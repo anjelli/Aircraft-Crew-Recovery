@@ -51,7 +51,6 @@ import logging
 import math
 import multiprocessing as mp
 import platform
-import re
 import sys
 import time
 from collections import Counter
@@ -60,6 +59,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from mgt_effective import apply_mgt_processing_by_arrival_date
+from project_paths import input_file, original_file
 
 LOG = logging.getLogger("pairing_experiment")
 ROOT = Path(__file__).resolve().parent
@@ -96,47 +98,8 @@ MAX_LAYOVER_COMBINED_DEMO = 72.0
 ASSUMPTION_TAG = "DEMO ASSUMPTION - NOT AN OFFICIAL SCOOT RULE"
 
 # --------------------------------------------------------------------------------------
-# File discovery / original module loading
+# Canonical source and prepared-input locations; no root or numbered-file fallback.
 # --------------------------------------------------------------------------------------
-
-
-def candidate_dirs(root: Path, original: bool) -> list[Path]:
-    if original:
-        dirs = [root / "originals", root / "original", root]
-    else:
-        dirs = [root / "input", root / "inputs", root / "data", root]
-    return [d for d in dirs if d.is_dir()]
-
-
-def find_file(root: Path, stem: str, ext: str, *, original: bool = False) -> Path:
-    dirs = candidate_dirs(root, original)
-
-    # Prefer the exact expected name.
-    for d in dirs:
-        p = d / f"{stem}{ext}"
-        if p.is_file():
-            return p
-
-    # Accept numbered variants such as MGT (4).xlsx.
-    rx = re.compile(rf"{re.escape(stem)}\s*(?:\((\d+)\))?{re.escape(ext)}$", re.I)
-    found: list[tuple[int, Path]] = []
-    for d in dirs:
-        for p in d.iterdir():
-            if not p.is_file():
-                continue
-            m = rx.fullmatch(p.name)
-            if m:
-                found.append((int(m.group(1)) if m.group(1) else -1, p))
-
-    if found:
-        found.sort(key=lambda x: (x[0], str(x[1]).lower()), reverse=True)
-        return found[0][1]
-
-    raise FileNotFoundError(
-        f"Could not find {stem}{ext}. Expected it in "
-        f"{root/'originals' if original else root/'input'}"
-    )
-
 
 def load_original_module(path: Path, module_name: str):
     """Load a supplied source file under the module name expected by multiprocessing."""
@@ -346,17 +309,25 @@ def simulate_disruption(base: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]
 def attach_mgt(df: pd.DataFrame, mgt_module, mgt_xlsx: Path,
                 airport_to_country: dict[str, str], subtypes: list[str]) -> pd.DataFrame:
     mgt_table = pd.read_excel(mgt_xlsx)
-    processed, _, _ = mgt_module.apply_mgt_processing(
+    processed, _, _ = apply_mgt_processing_by_arrival_date(
         df.copy().reset_index(drop=True),
-        mgt_table.copy(),
+        mgt_table,
+        mgt_module,
         AIRCRAFT_GROUPS_DEMO,
         airport_to_country,
         subtypes,
+        arrival_date_col="STA",
         sta_col="STA",
     )
-    if processed["MGT"].isna().any():
-        bad = processed.loc[processed["MGT"].isna(), ["Flt Num", "To", "Eqp"]].drop_duplicates().head(10)
-        raise RuntimeError("MGT.py returned missing MGT values:\n" + bad.to_string(index=False))
+    missing = processed["MGT"].isna()
+    if missing.any():
+        cols = [c for c in ("Day", "Flt Num", "To", "Eqp", "STA_local") if c in processed.columns]
+        bad = processed.loc[missing, cols].drop_duplicates().head(20)
+        raise RuntimeError(
+            "No applicable MGT rule matched these flight arrivals after Start Date/End Date/Freq "
+            "filtering. Expired rules are not reused; reconcile the source MGT effective dates "
+            + "\\n" + bad.to_string(index=False)
+        )
     return processed
 
 
@@ -715,13 +686,13 @@ def main() -> int:
     t0 = time.time()
 
     # Only these seven source files are required.
-    mgt_path = find_file(ROOT, "MGT", ".py", original=True)
-    builder_path = find_file(ROOT, "pairings_builder", ".py", original=True)
-    schedule_path = find_file(ROOT, "schedule", ".xlsx")
-    report_path = find_file(ROOT, "pairing_report", ".xlsx")
-    mgt_xlsx_path = find_file(ROOT, "MGT", ".xlsx")
-    fdp_path = find_file(ROOT, "fdp_rules", ".csv")
-    cost_path = find_file(ROOT, "cost_parameters", ".csv")
+    mgt_path = original_file("MGT.py")
+    builder_path = original_file("pairings_builder.py")
+    schedule_path = input_file("schedule.xlsx")
+    report_path = input_file("pairing_report.xlsx")
+    mgt_xlsx_path = original_file("MGT.xlsx")
+    fdp_path = original_file("fdp_rules.csv")
+    cost_path = original_file("cost_parameters.csv")
 
     for label, p in [
         ("MGT.py", mgt_path),
