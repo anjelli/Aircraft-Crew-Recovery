@@ -1,0 +1,46 @@
+20:53:19 | INFO | MGT.py: /home/claude/work/originals/MGT.py
+20:53:19 | INFO | pairings_builder.py: /home/claude/work/originals/pairings_builder.py
+20:53:19 | INFO | schedule.xlsx: /home/claude/work/input/schedule.xlsx
+20:53:19 | INFO | pairing_report.xlsx: /home/claude/work/input/pairing_report.xlsx
+20:53:19 | INFO | MGT.xlsx: /home/claude/work/MGT.xlsx
+20:53:19 | INFO | fdp_rules.csv: /home/claude/work/fdp_rules.csv
+20:53:19 | INFO | cost_parameters.csv: /home/claude/work/cost_parameters.csv
+20:53:19 | INFO | Builder execution mode: original multiprocessing Pool
+20:53:23 | WARNING | 26 pairing-report rows have blank Pairing ID; excluded from pairing validation (see output/audit)
+20:53:23 | INFO | Source schedule: 2026-10-25 to 2027-03-28 | 19238 flights | 155 calendar days
+20:53:23 | INFO | [166D] Running full source horizon: 2026-10-25 to 2027-03-28 (19238 flights)
+20:53:24 | INFO | Demo layover stations reconstructed from pairing report: ['CGO', 'CJU', 'NKG', 'OKA', 'WUH', 'XIY']
+20:53:24 | INFO | Demo assumptions: aircraft_groups={'320': {'32N', '32Q', '320'}, '787': set()} | max_layover=72.0h | max_combined_layover=72.0h
+20:53:29 | INFO | [166D] Disruption: 1347/19238 = 7.00% | {'CANCELLED': 337, 'RETIMED': 673, 'EQUIPMENT_CHANGED': 337}
+20:53:29 | INFO | [166D] Disruption log: /home/claude/work/output/disruption_log_166_days.csv
+20:53:29 | INFO | [166D] Disrupted schedule: /home/claude/work/output/disrupted_schedule_166_days.xlsx
+20:54:10 | INFO | [166D] MGT processing: 41.43s
+20:54:26 | INFO | [166D] Existing pairing validation: 4.06s | checked=8473 valid=7476 invalid=997 boundary_skipped=0
+build_min_return_hours: 0.04s
+Generating single-day pairings...
+Total single-day pairings: 10995
+Single-day pairings: 21.74s
+Flights requiring multi-day pairing: 2704
+Multi-day pairings: 0.16s
+Total: 21.94s
+Total multi-day pairings: 1119
+20:55:54 | INFO | [166D] Existing violations by type: {'CANCELLED_FLIGHT': 337, 'EQUIPMENT_CONTINUITY': 290, 'FDP_LIMIT': 45, 'MAX_LAYOVER': 25, 'MGT_CONNECTION': 332}
+20:55:54 | INFO | [166D] New pairings: 13049 | existing-valid + new coverage: 17551/18901 (92.86%) | uncovered=1350
+20:55:54 | INFO | [166D] Pairing generation runtime: 80.68s
+20:55:54 | INFO | [166D] Results workbook: /home/claude/work/output/pairing_experiment_166_days.xlsx
+
+====================================================================================================================
+166-DAY CREW PAIRING EXPERIMENT
+--------------------------------------------------------------------------------------------------------------------
+Source:                 2026-10-25 -> 2027-03-28 | 19,238 flights
+Disruption:             1,347 (7.00%) | {'CANCELLED': 337, 'RETIMED': 673, 'EQUIPMENT_CHANGED': 337}
+Existing pairings:      8,473 checked | 7,476 valid | 997 invalid
+Exact violations:       1,029
+New pairings:           13,049
+Combined candidate:     17,551/18,901 active flights covered | 1,350 uncovered
+Builder runtime:        80.68s
+Results workbook:       /home/claude/work/output/pairing_experiment_166_days.xlsx
+Disruption log:         /home/claude/work/output/disruption_log_166_days.csv
+Disrupted schedule:     /home/claude/work/output/disrupted_schedule_166_days.xlsx
+====================================================================================================================
+exit=0 runtime=155s

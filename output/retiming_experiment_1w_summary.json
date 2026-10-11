@@ -1,0 +1,10 @@
+{
+  "hypothesis": "49 = 7 offsets x 7 offsets on the two flights of a broken connection; reduced 7 = later flight only (UNVERIFIED reading of the meeting)",
+  "pairings_tested": 10,
+  "repairable_full": 10,
+  "repairable_reduced": 6,
+  "reduced_keeps_cost_optimum": 2,
+  "mean_full_feasible_of_49": 8.8,
+  "mean_reduced_feasible_of_7": 1.0,
+  "caveat": "Empirical per-instance check; not a proof of dominance. Ignores shared-flight/aircraft knock-on effects."
+}

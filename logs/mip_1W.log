@@ -1,0 +1,46 @@
+20:51:04 | INFO | [1W] Reading /home/claude/work/output/pairing_experiment_1_week.xlsx
+20:51:04 | INFO | [1W] Horizon=2026-10-25 to 2026-10-31 | active=811
+20:51:08 | INFO | [1W] Existing candidates: loaded=317 | report_total=8473 | valid_status_before_matching=317 | missing_match=0 | inactive=0 | boundary=11
+20:51:08 | INFO | [1W] Generated candidates: rows=527 | PASS loaded=527 | not PASS=0 | bad=0 | inactive/out-of-horizon=0 | duplicates=0
+20:51:08 | INFO | [1W] Candidate pool: existing=317 + generated=527 = 844 before cross-source dedup | final=527
+20:51:08 | INFO | Building MIP: flights=811 candidates=527 variables=1338
+20:51:08 | INFO | [1W] OPTIMAL | active=811 | existing=317 | generated=527 | candidate_pool=527 | selected=325 | uncovered=83 | runtime=0.02s
+{
+ "Horizon": "1 week",
+ "Start Date": "2026-10-25",
+ "End Date Used": "2026-10-31",
+ "Requested End Date": "2026-10-31",
+ "Active Flights": 811,
+ "Existing Valid Candidates": 317,
+ "Generated PASS Candidates": 527,
+ "Candidate Pool Before Cross-Source Dedup": 844,
+ "Candidate Pool After De-duplication": 527,
+ "Candidate-Covered Before MIP": 735,
+ "Candidate Coverage Before MIP %": 90.63,
+ "Selected Pairings": 325,
+ "Flights Covered After MIP": 728,
+ "Flights Uncovered After MIP": 83,
+ "MIP Coverage After MIP %": 89.77,
+ "Existing Report Pairings Total": 8473,
+ "Existing Pairing IDs Marked Invalid": 36,
+ "Existing Pairings Crossing Boundary": 11,
+ "Existing Pairings Missing Schedule Match": 0,
+ "Existing Pairings Inactive": 0,
+ "Existing Duplicate Sequences Removed": 0,
+ "Generated Rows Rejected": 0,
+ "Generated Duplicate Sequences Removed": 0,
+ "Cross-Source Duplicate Sequences Removed": 317,
+ "Solver Status": "OPTIMAL",
+ "Solver Message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+ "Objective": 67721.0,
+ "MIP Runtime (s)": 0.02,
+ "MIP Nodes": 1,
+ "MIP Gap": 0.0,
+ "MIP Dual Bound": 67721.0,
+ "Model": "Coverage-first binary set-partitioning with uncovered-flight slack",
+ "Aircraft Trackability": "NOT modeled",
+ "Crew Roster Feasibility": "NOT modeled",
+ "Operational Cost": "NOT modeled; secondary objective minimizes selected pairings",
+ "wall_runtime_s": 4.5
+}
+OUT /home/claude/work/output/mip_solution_1_week.xlsx

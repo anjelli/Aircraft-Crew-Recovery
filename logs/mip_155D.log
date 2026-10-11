@@ -1,0 +1,46 @@
+21:05:23 | INFO | [166D] Reading /home/claude/work/output/pairing_experiment_166_days.xlsx
+21:05:27 | INFO | [166D] Horizon=2026-10-25 to 2027-03-28 | active=18901
+21:05:38 | INFO | [166D] Existing candidates: loaded=7476 | report_total=8473 | valid_status_before_matching=7476 | missing_match=0 | inactive=0 | boundary=0
+21:05:38 | INFO | [166D] Generated candidates: rows=13049 | PASS loaded=13049 | not PASS=0 | bad=0 | inactive/out-of-horizon=0 | duplicates=0
+21:05:38 | INFO | [166D] Candidate pool: existing=7476 + generated=13049 = 20525 before cross-source dedup | final=13050
+21:05:38 | INFO | Building MIP: flights=18901 candidates=13050 variables=31951
+21:05:40 | INFO | [166D] OPTIMAL | active=18901 | existing=7476 | generated=13049 | candidate_pool=13050 | selected=7721 | uncovered=1535 | runtime=0.22s
+{
+ "Horizon": "166 days",
+ "Start Date": "2026-10-25",
+ "End Date Used": "2027-03-28",
+ "Requested End Date": "2027-03-28",
+ "Active Flights": 18901,
+ "Existing Valid Candidates": 7476,
+ "Generated PASS Candidates": 13049,
+ "Candidate Pool Before Cross-Source Dedup": 20525,
+ "Candidate Pool After De-duplication": 13050,
+ "Candidate-Covered Before MIP": 17551,
+ "Candidate Coverage Before MIP %": 92.86,
+ "Selected Pairings": 7721,
+ "Flights Covered After MIP": 17366,
+ "Flights Uncovered After MIP": 1535,
+ "MIP Coverage After MIP %": 91.88,
+ "Existing Report Pairings Total": 8473,
+ "Existing Pairing IDs Marked Invalid": 997,
+ "Existing Pairings Crossing Boundary": 0,
+ "Existing Pairings Missing Schedule Match": 0,
+ "Existing Pairings Inactive": 0,
+ "Existing Duplicate Sequences Removed": 0,
+ "Generated Rows Rejected": 0,
+ "Generated Duplicate Sequences Removed": 0,
+ "Cross-Source Duplicate Sequences Removed": 7475,
+ "Solver Status": "OPTIMAL",
+ "Solver Message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+ "Objective": 29022291.0,
+ "MIP Runtime (s)": 0.22,
+ "MIP Nodes": 1,
+ "MIP Gap": 0.0,
+ "MIP Dual Bound": 29022291.0,
+ "Model": "Coverage-first binary set-partitioning with uncovered-flight slack",
+ "Aircraft Trackability": "NOT modeled",
+ "Crew Roster Feasibility": "NOT modeled",
+ "Operational Cost": "NOT modeled; secondary objective minimizes selected pairings",
+ "wall_runtime_s": 17.1
+}
+OUT /home/claude/work/output/mip_solution_166_days.xlsx

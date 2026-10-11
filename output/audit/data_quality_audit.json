@@ -1,0 +1,187 @@
+{
+  "schedule": {
+    "rows": 19245,
+    "exact_duplicate_rows": 7,
+    "unique_flights": 19238,
+    "first_day": "2026-10-25",
+    "last_day": "2027-03-28",
+    "distinct_days": 155,
+    "calendar_days_inclusive": 155,
+    "missing_calendar_days": [],
+    "eqp_counts": {
+      "32Q": 9885,
+      "32N": 4020,
+      "320": 3807,
+      "32P": 1533
+    },
+    "nulls": {},
+    "flights_per_day_min_max": [
+      7,
+      138
+    ],
+    "flights_per_day_last5": {
+      "2027-03-24": 124,
+      "2027-03-25": 132,
+      "2027-03-26": 134,
+      "2027-03-27": 130,
+      "2027-03-28": 7
+    },
+    "local_minus_sin_offset_hours_by_origin_distinct": 0,
+    "block_time_vs_sin_clock_mismatch_rows": 0
+  },
+  "mgt": {
+    "rules": 35,
+    "effective": [
+      "2026-10-25",
+      "2027-03-27"
+    ],
+    "types": {
+      "Standard": 35
+    },
+    "freq": {
+      "1234567": 35
+    },
+    "arrival_window_rules": 0,
+    "exact_duplicate_rules": 1,
+    "flights_departing_after_last_effective_date": 7,
+    "mgt_py_reads_start_end_freq": false,
+    "note": "MGT.py drops/ignores Start Date/End Date/Freq/Cxr/Type; rules are applied regardless of date. Flights after the effective end have NO in-effect rule on paper.",
+    "subfleets_in_schedule_without_any_subfleet_rule": []
+  },
+  "pairing_report": {
+    "rows": 19240,
+    "blank_pairing_id_rows": 26,
+    "distinct_pairing_ids": 8473,
+    "existing_loader_ffill_would_attach_blank_rows_to": 8473
+  },
+  "revenue": {
+    "rows": 1533,
+    "plf_gt_1": 25,
+    "plf_min_max": [
+      0.3225806451612903,
+      1.194444444444444
+    ],
+    "fare_min_max": [
+      2333.333333333333,
+      157750.0
+    ],
+    "fare_gt_5000_rows": 1515,
+    "aircraft_codes": {
+      "32N": 294,
+      "320": 280,
+      "321": 273,
+      "78B": 189,
+      "788": 175,
+      "789": 161,
+      "290": 161
+    },
+    "nulls": {},
+    "schedule_routes_missing_in_revenue": 47,
+    "schedule_routes_total": 92,
+    "fare_stats_320_family_codes": {
+      "count": 574.0,
+      "mean": 23190.08,
+      "std": 10814.71,
+      "min": 2333.33,
+      "25%": 15297.62,
+      "50%": 20975.0,
+      "75%": 30809.38,
+      "max": 56250.0
+    }
+  },
+  "lines_of_work": {
+    "trailer_rows_excluded": [
+      [
+        "TRAILER",
+        "19240",
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    ],
+    "header_line": "AIRFLITE LINES OF WORK,TR_base_KGP,84,25Oct26,28Mar27,Local",
+    "rows": 19238,
+    "lines": 31,
+    "equip_counts": {
+      "32Q": 9884,
+      "32N": 4014,
+      "320": 3807,
+      "32P": 1533
+    },
+    "lines_by_equip": {
+      "320": 5,
+      "32N": 8,
+      "32P": 3,
+      "32Q": 15
+    },
+    "subfleet_line_num_max": 15,
+    "tail_or_registration_column_present": false,
+    "aln_values": {
+      "TR": 19238
+    },
+    "ac_own_values": {
+      "TR": 19238
+    },
+    "station_continuity_checks": 19207,
+    "station_continuity_breaks": 0,
+    "flight_rows_not_in_schedule_by_flt_date_route": 0,
+    "schedule_flights_not_in_lines": 0,
+    "lines_equip_320_count": 5,
+    "equip_codes_equal_schedule_subfleets": true,
+    "station_breaks_sample": [],
+    "lines_equip_by_line": {
+      "1": "['320']",
+      "2": "['320']",
+      "3": "['320']",
+      "4": "['320']",
+      "5": "['320']",
+      "6": "['32N']",
+      "7": "['32N']",
+      "8": "['32N']",
+      "9": "['32N']",
+      "10": "['32N']",
+      "11": "['32N']",
+      "12": "['32N']",
+      "13": "['32N']",
+      "14": "['32P']",
+      "15": "['32P']",
+      "16": "['32P']",
+      "17": "['32Q']",
+      "18": "['32Q']",
+      "19": "['32Q']",
+      "20": "['32Q']",
+      "21": "['32Q']",
+      "22": "['32Q']",
+      "23": "['32Q']",
+      "24": "['32Q']",
+      "25": "['32Q']",
+      "26": "['32Q']",
+      "27": "['32Q']",
+      "28": "['32Q']",
+      "29": "['32Q']",
+      "30": "['32Q']",
+      "31": "['32Q']"
+    },
+    "lines_with_mixed_equip": 0
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "workbook": "pairing_experiment_166_days.xlsx",
+  "window": [
+    "2026-10-25",
+    "2027-03-28"
+  ],
+  "experiment_invalid_pairings": 997,
+  "independent_invalid_pairings": 998,
+  "agree_on_invalid_set": false,
+  "only_experiment": [],
+  "only_independent": [
+    "7760"
+  ],
+  "pairing_violation_type_pairs_experiment": 1018,
+  "independent": 1019,
+  "only_in_experiment": [],
+  "only_in_independent": [
+    [
+      "7760",
+      "MGT_RULE_MISSING"
+    ]
+  ],
+  "independent_by_type": {
+    "CANCELLED_FLIGHT": 337,
+    "MGT_CONNECTION": 332,
+    "EQUIPMENT_CONTINUITY": 290,
+    "FDP_LIMIT": 45,
+    "MAX_LAYOVER": 25,
+    "MGT_RULE_MISSING": 1
+  },
+  "experiment_by_type": {
+    "CANCELLED_FLIGHT": 337,
+    "MGT_CONNECTION": 332,
+    "EQUIPMENT_CONTINUITY": 290,
+    "FDP_LIMIT": 45,
+    "MAX_LAYOVER": 25
+  },
+  "boundary_skipped": 0
+}
