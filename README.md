@@ -18,6 +18,8 @@ Date boundaries are inclusive. `Freq` is interpreted as ISO weekday digits (Mond
 
 If no MGT rule applies to a flight, the experiment stops and reports the affected arrivals instead of applying an expired rule. The committed MGT source currently ends on 27 March 2027, while the schedule includes 28 March 2027, so the full-horizon experiment is expected to stop until that data gap is reconciled with the source owner. Do not extend or invent a rule to make the run pass.
 
+The full-horizon script retains a historical 166-day default, but the committed schedule contains 155 days. To target the available data horizon, run `HORIZON_DAYS=155 python run_pairing_experiment_166_days.py` (PowerShell: `$env:HORIZON_DAYS=155; python run_pairing_experiment_166_days.py`). With the current MGT workbook, a stop on arrivals dated 28 March is expected; obtain an authoritative rule update before treating the horizon as complete.
+
 ## Install and test
 
 ```bash
