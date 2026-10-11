@@ -121,3 +121,50 @@ def test_input_and_source_paths_do_not_fall_back_to_project_root():
     # must come from originals/; accidental root/input shadowing is not accepted.
     with pytest.raises(FileNotFoundError, match="prepared input"):
         input_file("MGT.xlsx")
+
+
+def test_full_horizon_attach_mgt_fails_closed_for_arrivals_after_rule_expiry():
+    import importlib.util
+
+    schedule = pd.read_excel(input_file("schedule.xlsx"))
+    for column in ("Day", "STD", "STA", "STD_sin", "STA_sin"):
+        schedule[column] = pd.to_datetime(schedule[column], errors="raise")
+    schedule["Day"] = schedule["Day"].dt.normalize()
+    schedule["Eqp"] = schedule["Eqp"].astype(str).str.strip()
+
+    # MGT is applied using the scheduled local arrival date, not the departure Day label.
+    late_arrivals = schedule.loc[
+        schedule["STA"].dt.normalize().ge(pd.Timestamp("2027-03-28"))
+    ].copy().reset_index(drop=True)
+    assert not late_arrivals.empty, "Expected source schedule arrivals after MGT expiry"
+
+    airport_to_country = {}
+    for airport, group in schedule.groupby("To"):
+        values = {str(v).strip().upper() for v in group["Arvl Ctry"].dropna() if str(v).strip()}
+        if len(values) == 1:
+            airport_to_country[str(airport).strip().upper()] = next(iter(values))
+    for airport, group in schedule.groupby("From"):
+        values = {str(v).strip().upper() for v in group["Dept Ctry"].dropna() if str(v).strip()}
+        if len(values) == 1:
+            airport_to_country.setdefault(str(airport).strip().upper(), next(iter(values)))
+
+    source_spec = importlib.util.spec_from_file_location("mgt_source_for_test", original_file("MGT.py"))
+    assert source_spec and source_spec.loader
+    source_mgt = importlib.util.module_from_spec(source_spec)
+    source_spec.loader.exec_module(source_mgt)
+
+    runner_spec = importlib.util.spec_from_file_location(
+        "full_horizon_experiment_for_test", ROOT / "run_pairing_experiment_166_days.py"
+    )
+    assert runner_spec and runner_spec.loader
+    runner = importlib.util.module_from_spec(runner_spec)
+    runner_spec.loader.exec_module(runner)
+
+    with pytest.raises(RuntimeError, match="Expired rules are not reused"):
+        runner.attach_mgt(
+            late_arrivals,
+            source_mgt,
+            original_file("MGT.xlsx"),
+            airport_to_country,
+            sorted(schedule["Eqp"].astype(str).str.upper().unique()),
+        )
