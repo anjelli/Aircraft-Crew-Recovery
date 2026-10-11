@@ -791,16 +791,16 @@ def main() -> int:
     write_disrupted_schedule_file(disruption_xlsx, disrupted)
 
     LOG.info(
-        "[166D] Disruption: %d/%d = %.2f%% | %s",
+        "[HORIZON] Disruption: %d/%d = %.2f%% | %s",
         n_disrupted, len(horizon), disruption_pct, dict(counts)
     )
-    LOG.info("[166D] Disruption log: %s", disruption_csv)
-    LOG.info("[166D] Disrupted schedule: %s", disruption_xlsx)
+    LOG.info("[HORIZON] Disruption log: %s", disruption_csv)
+    LOG.info("[HORIZON] Disrupted schedule: %s", disruption_xlsx)
 
     # 2. MGT using supplied MGT.py
     mgt_start = time.time()
     processed = attach_mgt(disrupted, mgt, mgt_xlsx_path, airport_to_country, subtypes)
-    LOG.info("[166D] MGT processing: %.2fs", time.time() - mgt_start)
+    LOG.info("[HORIZON] MGT processing: %.2fs", time.time() - mgt_start)
 
     record_lookup = {r["flight_id"]: r for r in processed.to_dict("records")}
     active = processed[processed["active"]].copy().sort_values(["STD", "flight_id"]).reset_index(drop=True)
@@ -822,7 +822,7 @@ def main() -> int:
         requested_end,
     )
     LOG.info(
-        "[166D] Existing pairing validation: %.2fs | checked=%d valid=%d invalid=%d boundary_skipped=%d",
+        "[HORIZON] Existing pairing validation: %.2fs | checked=%d valid=%d invalid=%d boundary_skipped=%d",
         time.time() - validate_start,
         len(existing_df),
         int((existing_df["Status"] == "VALID").sum()) if len(existing_df) else 0,
@@ -908,7 +908,7 @@ def main() -> int:
     n_existing_invalid = int((existing_df["Status"] == "INVALID").sum()) if len(existing_df) else 0
 
     summary = {
-        "Horizon": "166 days",
+        "Horizon": f"{HORIZON_DAYS} days",
         "Start Date": source_start.date(),
         "End Date": requested_end.date(),
         "Source Flights": len(horizon),
