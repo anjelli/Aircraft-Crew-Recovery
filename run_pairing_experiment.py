@@ -243,7 +243,7 @@ def attach_mgt(df: pd.DataFrame, mgt_module, mgt_xlsx: Path, airport_to_country:
         raise RuntimeError(
             "No applicable MGT rule matched these flight arrivals after Start Date/End Date/Freq "
             "filtering. Expired rules are not reused; reconcile the source MGT effective dates "
-            + "\\n" + bad.to_string(index=False)
+            + "\n" + bad.to_string(index=False)
         )
     return processed
 

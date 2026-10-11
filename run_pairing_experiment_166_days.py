@@ -1,37 +1,39 @@
 #!/usr/bin/env python3
 """
-run_pairing_experiment_166_days_clean.py
+run_pairing_experiment_166_days.py
 
 ONE REQUIRED EXPERIMENT
 =======================
-Planned schedule (full 166-day source horizon)
+Planned schedule (configured source horizon; current data contains 155 days)
     -> deterministic 7% disruption
     -> validate existing pairings using supplied MGT.py + pairings_builder.py rules
     -> list exact violations
     -> run supplied ORIGINAL pairings_builder.py on disrupted active schedule
     -> compare pairing counts, flight coverage and runtime
 
-This file is the ONLY new experiment code.
+This script provides the full-horizon experiment entry point.
 Do NOT modify originals/MGT.py or originals/pairings_builder.py.
 
 Required source files
 ---------------------
 originals/MGT.py
 originals/pairings_builder.py
+originals/MGT.xlsx
+originals/fdp_rules.csv
+originals/cost_parameters.csv
 input/schedule.xlsx
 input/pairing_report.xlsx
-input/MGT.xlsx
-input/fdp_rules.csv
-input/cost_parameters.csv
 
 The disruption_log.csv is NOT required. This experiment creates its own reproducible
-166-day disruption log so every changed flight can be shown and audited.
+disruption log for the configured horizon so every changed flight can be shown and audited.
 
 Outputs
 -------
 output/disruption_log_166_days.csv
 output/disrupted_schedule_166_days.xlsx
 output/pairing_experiment_166_days.xlsx
+
+The output filenames retain the historical `166_days` suffix for compatibility even when HORIZON_DAYS is overridden. The Summary sheet records the configured horizon.
 
 The final workbook contains:
     Summary
@@ -72,8 +74,9 @@ OUTPUT_DIR = ROOT / "output"
 # --------------------------------------------------------------------------------------
 
 import os as _os
-# FIX (audit): source schedule has only 155 days; allow documented override via env HORIZON_DAYS (default 166 keeps original guard).
-HORIZON_DAYS = int(_os.environ.get("HORIZON_DAYS", "166"))
+# The historical script filename/output suffix is retained for compatibility.
+# Default to the 155-day source schedule; HORIZON_DAYS can explicitly override it.
+HORIZON_DAYS = int(_os.environ.get("HORIZON_DAYS", "155"))
 SEED = 2026
 DISRUPTION_RATE = 0.07
 MIN_DISRUPTION_RATE = 0.05
@@ -326,7 +329,7 @@ def attach_mgt(df: pd.DataFrame, mgt_module, mgt_xlsx: Path,
         raise RuntimeError(
             "No applicable MGT rule matched these flight arrivals after Start Date/End Date/Freq "
             "filtering. Expired rules are not reused; reconcile the source MGT effective dates "
-            + "\\n" + bad.to_string(index=False)
+            + "\n" + bad.to_string(index=False)
         )
     return processed
 
@@ -757,7 +760,7 @@ def main() -> int:
         )
 
     LOG.info(
-        "[166D] Running full source horizon: %s to %s (%d flights)",
+        "[HORIZON] Running configured source horizon: %s to %s (%d flights)",
         source_start.date(), requested_end.date(), len(horizon)
     )
 
@@ -788,16 +791,16 @@ def main() -> int:
     write_disrupted_schedule_file(disruption_xlsx, disrupted)
 
     LOG.info(
-        "[166D] Disruption: %d/%d = %.2f%% | %s",
+        "[HORIZON] Disruption: %d/%d = %.2f%% | %s",
         n_disrupted, len(horizon), disruption_pct, dict(counts)
     )
-    LOG.info("[166D] Disruption log: %s", disruption_csv)
-    LOG.info("[166D] Disrupted schedule: %s", disruption_xlsx)
+    LOG.info("[HORIZON] Disruption log: %s", disruption_csv)
+    LOG.info("[HORIZON] Disrupted schedule: %s", disruption_xlsx)
 
     # 2. MGT using supplied MGT.py
     mgt_start = time.time()
     processed = attach_mgt(disrupted, mgt, mgt_xlsx_path, airport_to_country, subtypes)
-    LOG.info("[166D] MGT processing: %.2fs", time.time() - mgt_start)
+    LOG.info("[HORIZON] MGT processing: %.2fs", time.time() - mgt_start)
 
     record_lookup = {r["flight_id"]: r for r in processed.to_dict("records")}
     active = processed[processed["active"]].copy().sort_values(["STD", "flight_id"]).reset_index(drop=True)
@@ -819,7 +822,7 @@ def main() -> int:
         requested_end,
     )
     LOG.info(
-        "[166D] Existing pairing validation: %.2fs | checked=%d valid=%d invalid=%d boundary_skipped=%d",
+        "[HORIZON] Existing pairing validation: %.2fs | checked=%d valid=%d invalid=%d boundary_skipped=%d",
         time.time() - validate_start,
         len(existing_df),
         int((existing_df["Status"] == "VALID").sum()) if len(existing_df) else 0,
@@ -879,8 +882,8 @@ def main() -> int:
             touched_count += 1
 
         generated_rows.append({
-            "Horizon": "166 days",
-            "New Pairing ID": f"NEW_166D_{i:07d}",
+            "Horizon": f"{HORIZON_DAYS} days",
+            "New Pairing ID": f"NEW_{HORIZON_DAYS}D_{i:07d}",
             "Pairing Type": str(meta.get("pairing_type", "UNKNOWN")),
             "Flight IDs": "|".join(ids),
             "Number of Sectors": int(meta.get("num_sectors", len(seq))),
@@ -905,7 +908,7 @@ def main() -> int:
     n_existing_invalid = int((existing_df["Status"] == "INVALID").sum()) if len(existing_df) else 0
 
     summary = {
-        "Horizon": "166 days",
+        "Horizon": f"{HORIZON_DAYS} days",
         "Start Date": source_start.date(),
         "End Date": requested_end.date(),
         "Source Flights": len(horizon),
@@ -942,7 +945,7 @@ def main() -> int:
             f"retime choices={RETIME_MINUTES}."
         ),
         "Notes": (
-            f"{skipped_boundary} existing pairings crossed the 166-day horizon boundary and were not evaluated. "
+            f"{skipped_boundary} existing pairings crossed the {HORIZON_DAYS}-day horizon boundary and were not evaluated. "
             "New pairings are candidate columns; this experiment does not perform the later MIP/crew assignment stage."
         ),
     }
@@ -958,16 +961,16 @@ def main() -> int:
 
     # 5. Terminal report
     coverage_pct = 100.0 * len(combined_cover) / len(active) if len(active) else 0.0
-    LOG.info("[166D] Existing violations by type: %s", dict(sorted(violation_counts.items())))
+    LOG.info("[HORIZON] Existing violations by type: %s", dict(sorted(violation_counts.items())))
     LOG.info(
-        "[166D] New pairings: %d | existing-valid + new coverage: %d/%d (%.2f%%) | uncovered=%d",
+        "[HORIZON] New pairings: %d | existing-valid + new coverage: %d/%d (%.2f%%) | uncovered=%d",
         len(generated_rows), len(combined_cover), len(active), coverage_pct, len(uncovered)
     )
-    LOG.info("[166D] Pairing generation runtime: %.2fs", generation_runtime)
-    LOG.info("[166D] Results workbook: %s", result_xlsx)
+    LOG.info("[HORIZON] Pairing generation runtime: %.2fs", generation_runtime)
+    LOG.info("[HORIZON] Results workbook: %s", result_xlsx)
 
     print("\n" + "=" * 116)
-    print("166-DAY CREW PAIRING EXPERIMENT")
+    print(f"{HORIZON_DAYS}-DAY CREW PAIRING EXPERIMENT")
     print("-" * 116)
     print(f"Source:                 {source_start.date()} -> {requested_end.date()} | {len(horizon):,} flights")
     print(f"Disruption:             {n_disrupted:,} ({disruption_pct:.2f}%) | {dict(counts)}")
