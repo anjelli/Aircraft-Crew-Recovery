@@ -104,7 +104,7 @@ def audit_data(schedule: pd.DataFrame, revenue: pd.DataFrame):
               "Note":"Screening flag only; not a business rule."})
     anomalies=pd.DataFrame(anomaly_rows,columns=["Revenue Row (Excel)","Routes","Aircraft Type Code","DoW","Avg_PLF","Avg_Pax_Fare_SGD","Anomaly","Note"])
     n=len(s); direct_route=int(s["_direct_route_match"].sum()); direct_re=int(s["_direct_re_match"].sum())
-    direct_exact=int(s["_direct_exact"].sum()); market_route=int(s["_market_route_match"].sum())
+    direct_exact=int(s["_direct_exact"].sum()); market_route_rows=int(s["_market_route_match"].sum())
     market_re=int(s["_market_re_match"].sum()); exact=int(s["_exact"].sum())
     markets=set(s["_market_route"]); schedule_keys=set(market); unique_matched=len(schedule_keys & unique_rkeys)
     summary={
@@ -116,7 +116,7 @@ def audit_data(schedule: pd.DataFrame, revenue: pd.DataFrame):
         "unique_schedule_routes":int(s["_direct_route"].nunique()),"matched_unique_schedule_routes":int(s.loc[s["_direct_route_match"],"_direct_route"].nunique())},
        "directed_route_plus_equipment":{"matched_rows":direct_re,"total_rows":n,"match_rate_pct":round(100*direct_re/max(1,n),3)},
        "directed_route_plus_equipment_plus_weekday":{"matched_rows":direct_exact,"total_rows":n,"match_rate_pct":round(100*direct_exact/max(1,n),3),"unmatched_rows":n-direct_exact},
-       "market_route_only":{"matched_rows":market_route,"total_rows":n,"match_rate_pct":round(100*market_route/max(1,n),3),
+       "market_route_only":{"matched_rows":market_route_rows,"total_rows":n,"match_rate_pct":round(100*market_route_rows/max(1,n),3),
         "schedule_markets":len(markets),"matched_schedule_markets":len(markets & revenue_routes),"revenue_markets_not_in_schedule":len(revenue_routes-markets)},
        "market_route_plus_equipment":{"matched_rows":market_re,"total_rows":n,"match_rate_pct":round(100*market_re/max(1,n),3)},
        "market_route_plus_equipment_plus_weekday":{"matched_rows":exact,"total_rows":n,"match_rate_pct":round(100*exact/max(1,n),3),
