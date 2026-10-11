@@ -4,7 +4,7 @@ run_pairing_experiment_166_days_clean.py
 
 ONE REQUIRED EXPERIMENT
 =======================
-Planned schedule (full 166-day source horizon)
+Planned schedule (configured source horizon; current data contains 155 days)
     -> deterministic 7% disruption
     -> validate existing pairings using supplied MGT.py + pairings_builder.py rules
     -> list exact violations
@@ -18,11 +18,11 @@ Required source files
 ---------------------
 originals/MGT.py
 originals/pairings_builder.py
+originals/MGT.xlsx
+originals/fdp_rules.csv
+originals/cost_parameters.csv
 input/schedule.xlsx
 input/pairing_report.xlsx
-input/MGT.xlsx
-input/fdp_rules.csv
-input/cost_parameters.csv
 
 The disruption_log.csv is NOT required. This experiment creates its own reproducible
 166-day disruption log so every changed flight can be shown and audited.
