@@ -245,8 +245,10 @@ class ResourceConstrainedPairingPricer:
         active = set(active_column_ids)
         scored: dict[str, tuple[PairingColumn, float]] = {}
         states_before = self._states_explored
+        candidate_count = 0
         best_rc: float | None = None
         for column in self._candidate_columns():
+            candidate_count += 1
             if column.column_id in active:
                 continue
             rc = reduced_cost(column, dual_prices)
@@ -255,7 +257,7 @@ class ResourceConstrainedPairingPricer:
                 scored[column.column_id] = (column, rc)
         ordered = sorted(scored.values(), key=lambda x: (x[1], x[0].column_id))
         selected = tuple(c for c, _ in ordered[:batch_size])
-        explored_this_call = (self._states_explored - states_before) + len(scored)
+        explored_this_call = (self._states_explored - states_before) + candidate_count
         return PricingBatch(
             columns=selected,
             best_reduced_cost=best_rc,
