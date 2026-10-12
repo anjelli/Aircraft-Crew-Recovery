@@ -63,3 +63,18 @@ The current `objective_spec.py` intentionally disables revenue-derived cancellat
 - Logs report iterations, LP objective, columns added, best reduced cost, pricing status, and stop reason.
 - LP optimality, integer optimality, and heuristic status are reported separately.
 - No operational objective component is reported as evaluated unless the corresponding decision variables and validated coefficients are actually present.
+
+
+## Phase 1 — validated builder-to-column adapter
+
+`src/crew_recovery/pairing_columns.py` converts the existing builder's pairing records and metadata into stable `PairingColumn` objects. It preserves `pairing_type`, `is_multi_day`, and `num_duties`; rejects candidates containing inactive/unknown flight IDs; and requires an independent-validator callback before admitting a candidate. The helper `independent_pairing_validator` delegates to `src/crew_recovery/independent_validator.py`.
+
+Duty splits are inferred only for supported builder metadata: `single_day`, simple two-sector `multi_day`, and combined pairings with an explicit layover station. Ambiguous split inference fails closed. If upstream metadata can provide exact `duty_splits`, those are preferred. Candidates rejected by the independent validator are returned in the build report with reasons rather than silently included.
+
+The adapter does not call the top-level builder itself. The experiment runner remains responsible for preparing schedule/rule data and calling the canonical builder with the appropriate horizon and settings. This keeps data loading and pairing generation in their existing locations.
+
+## Phase 2 — exhaustive tiny-instance benchmark
+
+Tests construct two legal overnight pairings, pass them through the independent validator and adapter, then compare column generation seeded with one pairing against the direct restricted-master LP over the entire candidate universe. The test asserts equal LP objectives, full flight coverage, and retention of the multi-day metadata. A separate negative case confirms that a pairing with insufficient inter-duty rest is rejected.
+
+This benchmark verifies the adapter and finite-pool LP mechanics for the tested candidate universe. It does not yet verify that the top-level builder's complete output is exhaustive for an operational schedule, nor does it implement on-demand resource-constrained pricing. Those remain the next milestone after the adapter is connected to the actual experiment runner.
