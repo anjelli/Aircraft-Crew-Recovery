@@ -1,13 +1,13 @@
 """Independent exhaustive checks for the bounded resource-constrained pricing domain.
 
-The reference enumerator below deliberately does not call ResourceConstrainedPairingPricer
+The reference enumerator deliberately does not call ResourceConstrainedPairingPricer
 or its duty-enumeration helpers. It brute-forces flight permutations on tiny schedules,
-applies the documented connection/FDP limits, and validates completed pairings with
+applies the documented connection/FDP limits, and validates complete pairings with
 the independent legality validator. Keep instances tiny: factorial enumeration is the point.
 """
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from itertools import permutations
 from pathlib import Path
 import sys
@@ -25,15 +25,12 @@ import independent_validator as iv
 from column_generation import reduced_cost
 from crew_recovery.resource_constrained_pricing import ResourceConstrainedPairingPricer
 
-
 HUB = "SIN"
 LAYOVERS = ("KUL", "BKK")
 MAX_SECTORS = 4
 
 
 def flight(fid, frm, to, std, *, equipment="320", mgt=50.0):
-    from datetime import datetime
-
     departure = datetime.fromisoformat(std)
     return {
         "flight_id": fid,
@@ -85,7 +82,7 @@ def make_pricer(flights):
 
 
 def _reference_duty_feasible(path, rules):
-    """Independent small-instance feasibility check, not production-pricer code."""
+    """Independent small-instance FDP check, not production-pricer code."""
     if not path or len(path) > MAX_SECTORS:
         return False
     start = path[0]["STD"] - timedelta(minutes=rules.dsb)
@@ -94,9 +91,7 @@ def _reference_duty_feasible(path, rules):
     hours = (end - start).total_seconds() / 3600
     band = iv.fdp_band(path[0]["STD_local"] - timedelta(minutes=rules.dsb))
     limits = rules.fdp.get(band)
-    if limits is None or len(limits) < len(path):
-        return False
-    return hours <= limits[len(path) - 1] + 1e-9
+    return limits is not None and len(limits) >= len(path) and hours <= limits[len(path) - 1] + 1e-9
 
 
 def _reference_connection_feasible(path):
@@ -108,8 +103,6 @@ def _reference_connection_feasible(path):
         if mgt is None:
             return False
         mgt = float(mgt)
-        # The source pairing rules use a 90-minute buffer for an equipment change
-        # after the second sector in a duty.
         if index == 1 and str(previous.get("Eqp", "")) != str(nxt.get("Eqp", "")):
             mgt = 90.0
         if nxt["STD"] < previous["STA"] + timedelta(minutes=mgt):
@@ -118,7 +111,7 @@ def _reference_connection_feasible(path):
 
 
 def exhaustive_reference_columns(flights, rules, validate):
-    """Brute-force every pairing in the declared domain for a tiny schedule."""
+    """Brute-force all legal single-duty and two-duty pairings in the declared domain."""
     active = [f for f in flights if f.get("active", True)]
     allowed_starts = {HUB, *LAYOVERS}
     duties = {}
@@ -127,22 +120,16 @@ def exhaustive_reference_columns(flights, rules, validate):
         for path in permutations(active, length):
             if str(path[0]["From"]).upper() not in allowed_starts:
                 continue
-            if not _reference_connection_feasible(path):
+            if not _reference_connection_feasible(path) or not _reference_duty_feasible(path, rules):
                 continue
-            if not _reference_duty_feasible(path, rules):
-                continue
-            ids = tuple(str(f["flight_id"]) for f in path)
-            duties[ids] = path
+            duties[tuple(str(f["flight_id"]) for f in path)] = path
 
     reference = {}
 
     def admit(path, splits, pairing_type):
         ids = tuple(str(f["flight_id"]) for f in path)
-        if len(set(ids)) != len(ids):
+        if len(set(ids)) != len(ids) or validate(path, splits, pairing_type):
             return
-        if validate(path, splits, pairing_type):
-            return
-        # Compare semantic identity, not the production-generated hash.
         key = (pairing_type, ids, tuple(tuple(s) for s in splits))
         reference[key] = 1.0
 
@@ -150,11 +137,9 @@ def exhaustive_reference_columns(flights, rules, validate):
         if str(duty[0]["From"]).upper() == HUB and str(duty[-1]["To"]).upper() == HUB and len(ids) >= 2:
             admit(duty, [list(range(len(ids)))], "single_day")
 
-    outbound = {}
-    inbound = {}
-    for ids, duty in duties.items():
-        start = str(duty[0]["From"]).upper()
-        end = str(duty[-1]["To"]).upper()
+    outbound, inbound = {}, {}
+    for duty in duties.values():
+        start, end = str(duty[0]["From"]).upper(), str(duty[-1]["To"]).upper()
         if start == HUB and end in LAYOVERS:
             outbound.setdefault(end, []).append(duty)
         if start in LAYOVERS and end == HUB:
@@ -176,58 +161,31 @@ def exhaustive_reference_columns(flights, rules, validate):
     return reference
 
 
-def production_semantic_columns(pricer, flight_ids):
-    # Very large duals make every legal nonempty candidate in this tiny universe improving.
-    batch = pricer({fid: 1000.0 for fid in flight_ids}, frozenset(), 1e-7, 100_000)
-    assert not batch.certified_no_improving_column
-    return {
-        (column.pairing_type, tuple(column.flight_ids), tuple(
-            tuple(range(0)) for _ in ()
-        )): column
-        for column in batch.columns
-    }, batch
-
-
 def test_pricer_matches_independent_exhaustive_pairing_universe():
     flights = [
         flight("S-K", "SIN", "KUL", "2026-10-25T09:00"),
         flight("S-B", "SIN", "BKK", "2026-10-25T10:00"),
         flight("K-S", "KUL", "SIN", "2026-10-26T08:00"),
         flight("B-S", "BKK", "SIN", "2026-10-26T09:00"),
-        # A second leg creates alternative duty paths; validator rules still decide legality.
         flight("K-B", "KUL", "BKK", "2026-10-25T12:00"),
-        # An intentionally disconnected flight must never enter a candidate.
         flight("X-Y", "HKG", "TPE", "2026-10-25T11:00"),
     ]
     pricer, rules, validate = make_pricer(flights)
     reference = exhaustive_reference_columns(flights, rules, validate)
+    assert reference, "The test schedule must contain legal single- and multi-day candidates."
 
-    batch = pricer(
-        {f["flight_id"]: 1000.0 for f in flights},
-        frozenset(),
-        1e-7,
-        100_000,
-    )
-    observed = {}
-    for column in batch.columns:
-        ids = tuple(column.flight_ids)
-        if column.pairing_type == "single_day":
-            splits = (tuple(range(len(ids))),)
-        else:
-            # The independent validator has already checked the actual split; recover
-            # the only supported two-duty split by matching the station transition.
-            split_at = next(
-                i for i in range(1, len(ids))
-                if next(f for f in flights if f["flight_id"] == ids[i - 1])["To"]
-                != next(f for f in flights if f["flight_id"] == ids[i])["To"]
-                or next(f for f in flights if f["flight_id"] == ids[i])["From"] in LAYOVERS
-            )
-            splits = (tuple(range(split_at)), tuple(range(split_at, len(ids))))
-        observed[(column.pairing_type, ids, splits)] = column.cost
+    batch = pricer({f["flight_id"]: 1000.0 for f in flights}, frozenset(), 1e-7, 100_000)
+    observed_pairs = {(c.pairing_type, tuple(c.flight_ids)) for c in batch.columns}
+    reference_pairs = {(kind, ids) for kind, ids, _splits in reference}
+    assert observed_pairs == reference_pairs
+    assert all("X-Y" not in ids for _kind, ids in observed_pairs)
 
-    assert set(observed) == set(reference)
-    assert observed == reference
-    assert all("X-Y" not in key[1] for key in observed)
+    # Every reference sequence has one unambiguous split contract and the expected duty count.
+    assert len(reference_pairs) == len(reference)
+    for kind, ids, splits in reference:
+        assert len(splits) == (2 if kind == "multi_day" else 1)
+        assert all(splits)
+        assert tuple(i for split in splits for i in split) == tuple(range(len(ids)))
 
 
 @pytest.mark.parametrize(
@@ -238,25 +196,22 @@ def test_pricer_matches_independent_exhaustive_pairing_universe():
         ({"OUT": 0.0, "BACK": 0.0}, "positive"),
     ],
 )
-def test_reduced_cost_signs_are_reported_consistently(duals, expected_sign):
+def test_reduced_cost_signs_and_pricing_decisions(duals, expected_sign):
     flights = [
         flight("OUT", "SIN", "KUL", "2026-10-25T09:00"),
         flight("BACK", "KUL", "SIN", "2026-10-26T08:00"),
     ]
     pricer, _, _ = make_pricer(flights)
     batch = pricer(duals, frozenset(), 1e-7, 100)
-    assert batch.columns
-    costs = [reduced_cost(column, duals) for column in batch.columns]
-    best = min(costs)
+
     if expected_sign == "negative":
-        assert best < -1e-7
+        assert batch.columns
+        assert min(reduced_cost(c, duals) for c in batch.columns) < -1e-7
         assert not batch.certified_no_improving_column
-    elif expected_sign == "zero":
-        assert best == pytest.approx(0.0)
-        assert batch.certified_no_improving_column
     else:
-        assert best > 0.0
+        assert batch.columns == ()
         assert batch.certified_no_improving_column
+        assert batch.best_reduced_cost == pytest.approx(0.0 if expected_sign == "zero" else 1.0)
 
 
 def test_certification_means_no_unseen_improving_column_when_all_are_active():
@@ -265,11 +220,11 @@ def test_certification_means_no_unseen_improving_column_when_all_are_active():
         flight("BACK", "KUL", "SIN", "2026-10-26T08:00"),
     ]
     pricer, _, _ = make_pricer(flights)
-    improving = pricer({"OUT": 100.0, "BACK": 100.0}, frozenset(), 1e-7, 100)
-    assert improving.columns
-    active_ids = frozenset(column.column_id for column in improving.columns)
+    duals = {"OUT": 100.0, "BACK": 100.0}
+    first = pricer(duals, frozenset(), 1e-7, 100)
+    assert first.columns
+    active_ids = frozenset(column.column_id for column in first.columns)
 
-    # Use the same duals deliberately: every improving column is already active.
-    second = pricer({"OUT": 100.0, "BACK": 100.0}, active_ids, 1e-7, 100)
+    second = pricer(duals, active_ids, 1e-7, 100)
     assert second.columns == ()
     assert second.certified_no_improving_column
