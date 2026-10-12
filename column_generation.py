@@ -24,6 +24,9 @@ class PairingColumn:
     column_id: str
     flight_ids: tuple[str, ...]
     cost: float = 1.0
+    pairing_type: str = "unknown"
+    is_multi_day: bool = False
+    num_duties: int = 1
 
     def __post_init__(self) -> None:
         if not str(self.column_id).strip():
@@ -34,6 +37,12 @@ class PairingColumn:
             raise ValueError(f"Column {self.column_id!r} repeats a flight ID")
         if not isfinite(float(self.cost)) or float(self.cost) < 0:
             raise ValueError(f"Column {self.column_id!r} has invalid cost {self.cost!r}")
+        if not str(self.pairing_type).strip():
+            raise ValueError("pairing_type must be non-empty")
+        if int(self.num_duties) < 1:
+            raise ValueError("num_duties must be >= 1")
+        if self.is_multi_day and int(self.num_duties) < 2:
+            raise ValueError("multi-day columns must contain at least two duties")
 
 
 @dataclass(frozen=True)
