@@ -799,6 +799,81 @@ def run_resource_constrained_pricing(active: pd.DataFrame, active_ids: set[str],
         max_iterations=100,
     )
     runtime = time.time() - started
+
+    # Persist the final LP state so coverage gaps can be traced to exact flight IDs.
+    # These are audit artifacts for this experiment, not operational recovery outputs.
+    from column_generation import reduced_cost
+
+    audit_dir = OUTPUT_DIR / "column_generation" / f"{tag.lower()}_solution_audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    duals = result.solution.dual_prices
+    slack = result.solution.uncovered_values
+    values = result.solution.column_values
+    flight_rows = []
+    for flight_id in sorted(active_ids):
+        covering = [
+            column.column_id for column in result.columns
+            if flight_id in column.flight_ids
+        ]
+        selected_cover = [
+            column_id for column_id in covering
+            if values.get(column_id, 0.0) > 1e-7
+        ]
+        flight_rows.append({
+            "flight_id": flight_id,
+            "lp_uncovered_slack": float(slack.get(flight_id, 0.0)),
+            "lp_uncovered_positive": bool(slack.get(flight_id, 0.0) > 1e-7),
+            "flight_dual_price": float(duals[flight_id]),
+            "candidate_columns_covering_flight": len(covering),
+            "positive_lp_columns_covering_flight": "|".join(selected_cover),
+        })
+    pd.DataFrame(flight_rows).to_csv(audit_dir / "flight_coverage.csv", index=False)
+
+    column_rows = []
+    for column in result.columns:
+        rc = reduced_cost(column, duals)
+        column_rows.append({
+            "column_id": column.column_id,
+            "pairing_type": column.pairing_type,
+            "is_multi_day": column.is_multi_day,
+            "num_duties": column.num_duties,
+            "cost": float(column.cost),
+            "lp_value": float(values.get(column.column_id, 0.0)),
+            "selected_positive": bool(values.get(column.column_id, 0.0) > 1e-7),
+            "reduced_cost_at_final_duals": float(rc),
+            "flight_ids": "|".join(column.flight_ids),
+        })
+    pd.DataFrame(column_rows).to_csv(audit_dir / "column_values_and_reduced_costs.csv", index=False)
+    pd.DataFrame(
+        [{"flight_id": fid, "dual_price": float(price)} for fid, price in sorted(duals.items())]
+    ).to_csv(audit_dir / "flight_duals.csv", index=False)
+
+    audit_summary = {
+        "horizon": tag,
+        "active_flights": len(active_ids),
+        "lp_objective": float(result.solution.objective),
+        "total_uncovered_slack": float(sum(slack.values())),
+        "flights_with_positive_uncovered_slack": int(sum(v > 1e-7 for v in slack.values())),
+        "columns_in_final_master": len(result.columns),
+        "positive_lp_columns": int(sum(v > 1e-7 for v in values.values())),
+        "pricing_converged_over_declared_domain": bool(result.converged),
+        "pricing_status": result.pricing_status,
+        "stop_reason": result.stop_reason,
+        "audit_files": [
+            "flight_coverage.csv",
+            "column_values_and_reduced_costs.csv",
+            "flight_duals.csv",
+        ],
+        "coverage_interpretation": (
+            "LP slack is from the final restricted-master solution. It is not the same "
+            "metric as candidate-union coverage; a flight can occur in a candidate but "
+            "remain partly or wholly uncovered in the LP solution."
+        ),
+    }
+    (audit_dir / "summary.json").write_text(
+        json.dumps(audit_summary, indent=2, sort_keys=True), encoding="utf-8"
+    )
+
     report = {
         "horizon": tag,
         "active_flights": len(active_ids),
