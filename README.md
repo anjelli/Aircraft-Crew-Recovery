@@ -41,7 +41,6 @@ python run_pairing_experiment.py --horizons 1W
 
 The original `MGT.py` and `pairings_builder.py` are not modified by the effective-date adapter.
 
-
 ## Revenue audit and objective readiness
 
 Run the reproducible join audit, the saved baseline objective decomposition, and the regression tests:
@@ -55,3 +54,15 @@ python -m pytest -q tests
 The revenue audit writes join-rate, unmatched-key, anomaly, and per-equipment reports under `output/revenue_audit/`. The objective-readiness script writes the current generic-MIP objective decomposition and the four requested operational component statuses under `output/objective_readiness/`.
 
 **Important:** repository inspection did not find the production column-generation/aircraft-timeline solver; `patches/mip.py.orig` is only an archived coverage MIP. The four-term operational objective is therefore exposed as a tested interface but is marked blocked/not run until the real solver and decision variables are supplied. Revenue cancellation cost remains disabled pending confirmation of fare units, PLF anomalies, route direction, and equipment-code mapping. See `OBJECTIVE_LAYER_READINESS.md`.
+
+## Column-generation research foundation
+
+An isolated LP research baseline has been added in `column_generation.py` on the `research/column-generation-foundation` branch. It solves a restricted master, reads flight-coverage duals, prices unseen pairings by reduced cost, and records convergence. Its current pricing oracle scans an explicitly supplied finite candidate pool; this is a controlled validation step, not yet a resource-constrained shortest-path pricing algorithm.
+
+Run the focused tests with:
+
+```bash
+python -m pytest -q tests/test_column_generation.py
+```
+
+This module solves the **LP relaxation** for the supplied finite universe. It does not implement branch-and-price and cannot claim integer optimality. It must not be represented as the missing production recovery solver. The formulation and staged implementation gates are documented in `COLUMN_GENERATION_FOUNDATION.md`. The operational objective remains blocked until its decision variables and business assumptions are defined and validated.
