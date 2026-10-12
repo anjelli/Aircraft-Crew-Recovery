@@ -1,0 +1,39 @@
+parameter,value,description
+retime_base,0,Ensure original copy
+retime_duration_tier_1,5,Tier 1 retiming offset
+retime_duration_tier_2,10,Tier 2 retiming offset
+retime_duration_tier_3,15,Tier 3 retiming offset
+duty_start_buffer,60,Duty start buffer in minutes
+reported_duty_end_buffer,30,Duty end in reports
+fdp_end_buffer,0,FDP buffer after STA
+sin_mgt_320,50,For build_adjacency: for pair stitching (320)
+sin_mgt_290,40,For build_adjacency: for pair stitching (290)
+sin_min_mgt,50,Minimum ground time in SIN (minutes)
+spoke_min_mgt,45,Minimum ground time in Spoke (minutes)
+retiming_cost_tier_1,0.001,Retiming cost for 5 mins
+retiming_cost_tier_2,0.003,Retiming cost for 10 mins
+retiming_cost_tier_3,0.006,Retiming cost for 15 mins
+swapping_cost_tier_1,0.01,Switch between 320/32N and 32Q
+swapping_cost_tier_2,0.005,Switch between 320 and 32N
+MULT_cost,100,Multiplier cost
+unutilized_hub_time_cost_scaling,20,Scaling for unutilized hub time
+unutilized_spoke_time_cost_scaling,40,Scaling for unutilized spoke time
+fdp_wasted_cost_scaling,1,Scaling for wasted FDP
+man_day_cost,785,510 Captain + 275 FO (2026 Table)
+turnaround_allowance,44,Reporting between 00:00 to 07:30 and STA between 22:00 and 05:30
+four_sector_allowance,162,96+66
+meal_subsidy_7,12,2*6
+meal_subsidy_7_10,19,2*9.5
+meal_subsidy_10_13,24,2*12
+meal_subsidy_13,30,2*15
+productivity_incentive_tier_A,194,115 Captain + 79 FO
+productivity_incentive_tier_B,202,120 Captain + 82 FO
+productivity_incentive_tier_C,208,124 Captain + 84 FO
+layover_transport,88,44*2
+line_change_mgt,90,
+local_night_start,22,
+local_night_end,8,
+320_seats,180,
+32N_seats,186,
+32P_seats,186,
+32Q_seats,236,

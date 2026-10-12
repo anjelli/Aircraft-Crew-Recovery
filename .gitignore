@@ -1,19 +1,12 @@
-# Python / test artifacts
+# Python bytecode and test caches
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local environments
 .venv/
 venv/
 *.egg-info/
 .DS_Store
-
-# Prepared inputs and generated run outputs
-/input/
-/output/
-
-# Keep only the two saved baseline logs; ignore new local run logs.
-/logs/*
-!/logs/mip_1W.log
-!/logs/mip_155D.log

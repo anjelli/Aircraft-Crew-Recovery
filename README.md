@@ -1,53 +1,57 @@
 # Aircraft Crew Recovery
 
-A prototype for crew-pairing generation, legality checks, and seeded disruption experiments. It is **not** a production aircraft-and-crew recovery optimizer: the available selection model optimizes flight coverage and pairing count only.
+This repository contains a prototype crew-pairing validation and disruption experiment. The current MIP is a coverage baseline, not a complete operational recovery optimizer.
 
-## Canonical layout
+## Canonical input layout
 
-- `originals/`: immutable source data and supplied implementation files.
-- `input/`: generated runtime inputs. Created by `setup_workspace.py`; do not edit or commit.
-- Root Python modules: experiment orchestration, validation, rule adaptation, and audits.
-- `tests/` and `tests/fixtures/`: regression tests and pinned historical baseline data.
-- `logs/mip_1W.log`, `logs/mip_155D.log`: saved coverage-MIP results used by the objective-readiness audit.
-- `archive/coverage_mip.py`: archived generic coverage model, retained for provenance; not an active solver.
-- `reports/baseline/`: small historical audit snapshots, not live run output.
-- `output/`: generated workbooks, logs, and machine-readable reports; intentionally untracked.
+- `originals/`: source-of-truth files supplied to the project. Do not overwrite them during preparation.
+- `input/`: prepared runtime inputs consumed by the experiment scripts.
+- `output/`: generated workbooks, audits, and logs.
 
-## Setup and test
+Run `python setup_workspace.py` to build `input/schedule.xlsx` and `input/pairing_report.xlsx`. The schedule preparation removes exact duplicate rows using all columns except the export-only `Unnamed: 0` index column, and records duplicate rows under `output/audit/`. The pairing report is copied unchanged. Runtime code resolves source files only from `originals/` and prepared files only from `input/`; it does not silently select root-level or numbered filename variants.
+
+## MGT effective dates
+
+The supplied `MGT.py` handles rule specificity and arrival-time windows but does not filter rules by `Start Date`, `End Date`, or `Freq`. The experiment adapter therefore filters the rule table separately for each flight's local scheduled arrival date before calling the supplied implementation.
+
+Date boundaries are inclusive. `Freq` is interpreted as ISO weekday digits (Monday=1, Sunday=7); a blank frequency is treated as all days. This frequency convention must be confirmed with the airline before operational use.
+
+If no MGT rule applies to a flight, the experiment stops and reports the affected arrivals instead of applying an expired rule. The committed MGT source currently ends on 27 March 2027, while the schedule includes 28 March 2027, so the full-horizon experiment is expected to stop until that data gap is reconciled with the source owner. Do not extend or invent a rule to make the run pass.
+
+The full-horizon script keeps its historical filename for compatibility, but defaults to the 155 calendar days present in the committed schedule. Set `HORIZON_DAYS` explicitly to override this. The output filenames also retain the historical `166_days` suffix for compatibility; the summary sheet reports the configured horizon. With the current MGT workbook, a stop on arrivals dated 28 March is expected; obtain an authoritative rule update before treating the horizon as complete.
+
+## Install and test
 
 ```bash
 python -m pip install -r requirements.txt
-python setup_workspace.py
 python -m pytest -q tests
 ```
 
-`setup_workspace.py` verifies the canonical files in `originals/`, removes exact duplicate schedule rows (ignoring the export-only `Unnamed: 0` column), records duplicate rows under `output/audit/`, and regenerates `input/schedule.xlsx` and `input/pairing_report.xlsx`. Source artifacts are not overwritten.
-
-## Main commands
+Focused MGT regression tests can be run with:
 
 ```bash
-# One-week disruption/pairing experiment
-python run_pairing_experiment.py --horizons 1W
-
-# Revenue join audit and objective-layer readiness
-python revenue_audit.py
-python objective_layer_readiness.py
+python -m pytest -q tests/test_mgt_effective.py
 ```
 
-The separate full-horizon entry point is `run_pairing_experiment_166_days.py`. It has a historical filename, but the source schedule spans **155 calendar days**, inclusive. With the current MGT workbook it correctly stops for arrivals beyond the last effective rule date rather than silently reusing expired rules. Obtain an authoritative rule update before treating that horizon as complete.
+Run a one-week experiment with:
 
-## Rule semantics and assumptions
+```bash
+python run_pairing_experiment.py --horizons 1W
+```
 
-`mgt_effective.py` filters supplied MGT rows by inclusive `Start Date`/`End Date` and by `Freq`, then delegates rule resolution to the unchanged source implementation in `originals/MGT.py`. The current adapter interprets weekday digits 1–7 as ISO weekdays and blank frequency as daily; the data owner must confirm this convention.
+The original `MGT.py` and `pairings_builder.py` are not modified by the effective-date adapter.
 
-The pairing generator/experiment also uses explicitly labelled demo assumptions, including aircraft groups and the 72-hour layover cap. These are not official operating rules and must be confirmed before operational use.
 
-## Optimizer boundary
+## Revenue audit and objective readiness
 
-The current coverage baseline minimizes uncovered-flight slack first, then the number of selected pairings. It does not model aircraft-tail trackability, crew roster feasibility, cancellation decisions, flight-copy/retiming variables, crew-efficiency variables, or distinct crew-set assignments. The four-term objective in `objective_spec.py` is an interface contract only; integration remains blocked until the actual production solver and its decision variables are supplied.
+Run the reproducible join audit, the saved baseline objective decomposition, and the regression tests:
 
-Revenue-derived cancellation costs remain disabled until the route-direction convention, fare meaning/units, abnormal load factors, and equipment-code crosswalk are confirmed. See `OBJECTIVE_LAYER_READINESS.md` for measured join coverage, baseline decomposition, and blockers.
+```bash
+python revenue_audit.py
+python objective_layer_readiness.py
+python -m pytest -q tests
+```
 
-## Historical snapshots
+The revenue audit writes join-rate, unmatched-key, anomaly, and per-equipment reports under `output/revenue_audit/`. The objective-readiness script writes the current generic-MIP objective decomposition and the four requested operational component statuses under `output/objective_readiness/`.
 
-Files under `reports/baseline/` are snapshots of previous analyses, not automatically refreshed build products. Live outputs are written to `output/` and can be regenerated where the repository contains the corresponding workflow.
+**Important:** repository inspection did not find the production column-generation/aircraft-timeline solver; `patches/mip.py.orig` is only an archived coverage MIP. The four-term operational objective is therefore exposed as a tested interface but is marked blocked/not run until the real solver and decision variables are supplied. Revenue cancellation cost remains disabled pending confirmation of fare units, PLF anomalies, route direction, and equipment-code mapping. See `OBJECTIVE_LAYER_READINESS.md`.
