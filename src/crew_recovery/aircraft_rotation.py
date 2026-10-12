@@ -106,6 +106,10 @@ def solve_aircraft_rotations(
                 and flight["STD"] >= tail.available_at
             )
 
+    for fi, fid in enumerate(flight_ids):
+        if not eligible[:, fi].any():
+            raise ValueError(f"No aircraft has compatible equipment for flight {fid!r}")
+
     # Variable blocks: assign x[a,i], source s[a,i], sink t[a,i], arcs y[a,i,j].
     x0 = 0
     s0 = n_a * n_f
