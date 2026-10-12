@@ -186,8 +186,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workbook", default="output/pairing_experiment_1_week.xlsx")
-    parser.add_argument("--flight-coverage", default="output/audit/flight_coverage.csv")
-    parser.add_argument("--column-audit", default="output/audit/column_values_and_reduced_costs.csv")
+    parser.add_argument("--flight-coverage", default="output/column_generation/1w_solution_audit/flight_coverage.csv")
+    parser.add_argument("--column-audit", default="output/column_generation/1w_solution_audit/column_values_and_reduced_costs.csv")
     parser.add_argument("--duplicate-rows", default="output/audit/schedule_exact_duplicate_rows.csv")
     parser.add_argument("--excluded-rows", default="output/audit/unpaired_rows_excluded_from_pairing_report.csv")
     parser.add_argument("--output-dir", default="output/audit/recovery_gap")
