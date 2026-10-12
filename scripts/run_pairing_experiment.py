@@ -741,6 +741,90 @@ def run_column_generation_benchmark(pairs, metadata, active_ids, ctx, tag: str):
     return report
 
 
+def run_resource_constrained_pricing(active: pd.DataFrame, active_ids: set[str], ctx: dict, tag: str):
+    """Run the on-demand resource-constrained pricing prototype on active schedule rows."""
+    import independent_validator as iv
+    from crew_recovery.integrated_column_generation import solve_with_pricing
+    from crew_recovery.resource_constrained_pricing import ResourceConstrainedPairingPricer
+
+    rules = iv.Rules(
+        fdp=ctx["fdp"], dsb=ctx["dsb"], feb=ctx["feb"], deb=ctx["deb"],
+        max_layover_h=MAX_LAYOVER_HOURS_DEMO,
+    )
+
+    def validate_priced_pairing(seq, duty_splits, pairing_type):
+        records = []
+        for flight in seq:
+            record = dict(flight)
+            if record.get("mgt_min") is None and record.get("MGT_td") is not None:
+                mgt_td = record["MGT_td"]
+                if hasattr(mgt_td, "total_seconds"):
+                    record["mgt_min"] = float(mgt_td.total_seconds()) / 60.0
+            records.append(record)
+        return iv.check_pairing(
+            "resource-priced-candidate",
+            records,
+            [list(split) for split in duty_splits],
+            rules,
+        )
+
+    pricer = ResourceConstrainedPairingPricer(
+        active.to_dict("records"),
+        fdp_limits=ctx["fdp"],
+        duty_start_buffer=ctx["dsb"],
+        fdp_end_buffer=ctx["feb"],
+        duty_end_buffer=ctx["deb"],
+        max_layover_hours=MAX_LAYOVER_HOURS_DEMO,
+        layover_stations=ctx["layover_stations"],
+        validator=validate_priced_pairing,
+        pairing_cost=1.0,
+        hub=pb_hub(ctx),
+        max_sectors_per_duty=4,
+    )
+    started = time.time()
+    result = solve_with_pricing(
+        sorted(active_ids),
+        pricer,
+        uncovered_penalty=float(len(active_ids) + 1),
+        batch_size=50,
+        max_iterations=100,
+    )
+    runtime = time.time() - started
+    report = {
+        "horizon": tag,
+        "active_flights": len(active_ids),
+        "pricing_domain": "single-duty hub turnaround and two-duty hub-layover-hub pairings",
+        "max_sectors_per_duty": 4,
+        "max_actual_duties_per_pairing": 2,
+        "layover_stations": list(ctx["layover_stations"]),
+        "iterations": result.iterations,
+        "converged_over_declared_pricing_domain": result.converged,
+        "stop_reason": result.stop_reason,
+        "pricing_status": result.pricing_status,
+        "final_columns": len(result.columns),
+        "single_day_columns": sum(not c.is_multi_day for c in result.columns),
+        "multi_day_columns": sum(c.is_multi_day for c in result.columns),
+        "objective": result.solution.objective,
+        "uncovered_flights_with_positive_slack": sum(
+            value > 1e-7 for value in result.solution.uncovered_values.values()
+        ),
+        "total_uncovered_slack": sum(result.solution.uncovered_values.values()),
+        "runtime_seconds": round(runtime, 3),
+        "history": [dict(item) for item in result.history],
+    }
+    out = OUTPUT_DIR / "column_generation" / f"{tag.lower()}_resource_constrained_pricing.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2, sort_keys=True, default=str), encoding="utf-8")
+    LOG.info("Resource-constrained pricing report: %s", out)
+    LOG.info("Resource-constrained pricing status: %s (%s)", result.pricing_status, result.stop_reason)
+    return report
+
+
+def pb_hub(ctx: dict) -> str:
+    """Return the hub configured by the canonical builder loaded for this run."""
+    return str(ctx["pb"].HUB)
+
+
 # --------------------------------------------------------------------------------------
 # Single horizon
 # --------------------------------------------------------------------------------------
@@ -859,6 +943,8 @@ def run_horizon(tag: str, name: str, base: pd.DataFrame, report_groups, ctx: dic
 
     if ctx.get("run_column_generation_benchmark", False):
         run_column_generation_benchmark(pairs, metadata, active_ids, ctx, tag)
+    if ctx.get("run_resource_constrained_pricing", False):
+        run_resource_constrained_pricing(active, active_ids, ctx, tag)
 
     disruption_lookup = {
         r["flight_id"]: ("CANCELLED" if not r["active"] else r["disruption_status"])
@@ -928,6 +1014,10 @@ def main(argv=None) -> int:
         "--column-generation-benchmark", action="store_true",
         help="Adapt independently validated builder output into pairing columns and compare finite-pool CG against the full-pool LP. May be expensive for 1M.",
     )
+    ap.add_argument(
+        "--resource-constrained-pricing", action="store_true",
+        help="Run exact on-demand pricing over single-duty and two-duty hub-layover-hub pairings. May be expensive; exactness is limited to the declared pricing domain.",
+    )
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S")
@@ -951,10 +1041,12 @@ def main(argv=None) -> int:
             if tag not in wanted:
                 continue
             LOG.info("Starting isolated %s subprocess", tag)
-            subprocess.run(
-                [sys.executable, str(Path(__file__).resolve()), "--horizons", tag],
-                check=True,
-            )
+            child_cmd = [sys.executable, str(Path(__file__).resolve()), "--horizons", tag]
+            if args.column_generation_benchmark:
+                child_cmd.append("--column-generation-benchmark")
+            if args.resource_constrained_pricing:
+                child_cmd.append("--resource-constrained-pricing")
+            subprocess.run(child_cmd, check=True)
         print("\nCombined experiment completed successfully.")
         print(f"  {OUTPUT_DIR / output_filename('1W')}")
         print(f"  {OUTPUT_DIR / output_filename('1M')}")
@@ -1038,6 +1130,8 @@ def main(argv=None) -> int:
         "layover_stations": layover_stations,
         "checker": checker,
         "run_column_generation_benchmark": args.column_generation_benchmark,
+        "run_resource_constrained_pricing": args.resource_constrained_pricing,
+        "pb": pb,
     }
     groups = group_report(report)
 
