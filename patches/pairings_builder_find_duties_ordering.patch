@@ -1,0 +1,9 @@
+--- a/originals/pairings_builder.py
++++ b/originals/pairings_builder.py
+@@
+-        if nxt["STA"] > latest_allowed_sta:
+-            break  # candidates are STD-sorted, so nothing further can qualify
++        if nxt["STA"] > latest_allowed_sta:
++            # Candidates are sorted by STD, not STA. A later departure can
++            # still be a shorter flight and arrive before the FDP boundary.
++            continue
