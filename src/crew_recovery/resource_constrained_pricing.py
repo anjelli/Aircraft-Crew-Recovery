@@ -242,22 +242,22 @@ class ResourceConstrainedPairingPricer:
             raise ValueError("batch_size must be >= 1")
         active = set(active_column_ids)
         scored: dict[str, tuple[PairingColumn, float]] = {}
-        explored = self._states_explored
+        states_before = self._states_explored
+        best_rc: float | None = None
         for column in self._candidate_columns():
-            explored += 1
             if column.column_id in active:
                 continue
             rc = reduced_cost(column, dual_prices)
+            best_rc = rc if best_rc is None else min(best_rc, rc)
             if rc < -float(reduced_cost_tolerance):
                 scored[column.column_id] = (column, rc)
-        self._states_explored = explored
         ordered = sorted(scored.values(), key=lambda x: (x[1], x[0].column_id))
-        best_rc = ordered[0][1] if ordered else 0.0
         selected = tuple(c for c, _ in ordered[:batch_size])
+        explored_this_call = (self._states_explored - states_before) + len(scored)
         return PricingBatch(
             columns=selected,
             best_reduced_cost=best_rc,
             certified_no_improving_column=not ordered,
-            explored_states=explored,
+            explored_states=explored_this_call,
             status="exact-duty-enumeration-two-duty-pairing-domain",
         )
