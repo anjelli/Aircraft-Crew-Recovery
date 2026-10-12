@@ -142,3 +142,120 @@ def test_multiday_pairing_column_is_added_when_its_reduced_cost_is_improving():
     assert result.solution.objective == pytest.approx(1.0)
     assert result.solution.uncovered_values["OUTBOUND"] == pytest.approx(0.0)
     assert result.solution.uncovered_values["RETURN"] == pytest.approx(0.0)
+
+
+
+def _schedule_flight(fid, frm, to, std):
+    from datetime import datetime, timedelta
+    departure = datetime.fromisoformat(std)
+    arrival = departure + timedelta(hours=1)
+    return {
+        "flight_id": fid,
+        "From": frm,
+        "To": to,
+        "STD": departure,
+        "STA": arrival,
+        "STD_local": departure,
+        "STA_local": arrival,
+        "Eqp": "320",
+        "mgt_min": 50,
+        "mgt_status": "TEST_RULE",
+        "active": True,
+    }
+
+
+def test_builder_pairing_adapter_preserves_and_validates_multiday_columns():
+    import independent_validator as iv
+    from crew_recovery.pairing_columns import (
+        build_pairing_columns,
+        independent_pairing_validator,
+    )
+
+    rules = iv.Rules(fdp=iv.load_fdp(ROOT / "originals" / "fdp_rules.csv"))
+    outbound_1 = _schedule_flight("OUT1", "SIN", "KUL", "2026-10-25T09:00")
+    inbound_1 = _schedule_flight("BACK1", "KUL", "SIN", "2026-10-26T08:00")
+    outbound_2 = _schedule_flight("OUT2", "SIN", "BKK", "2026-10-25T10:00")
+    inbound_2 = _schedule_flight("BACK2", "BKK", "SIN", "2026-10-26T09:00")
+
+    pairings = [[outbound_1, inbound_1], [outbound_2, inbound_2]]
+    metadata = [
+        {"pairing_type": "multi_day", "num_sectors": 2, "num_duties": 2,
+         "is_multi_day": True, "layover_station": "KUL", "layover_hours": 22.0},
+        {"pairing_type": "multi_day", "num_sectors": 2, "num_duties": 2,
+         "is_multi_day": True, "layover_station": "BKK", "layover_hours": 22.0},
+    ]
+    built = build_pairing_columns(
+        pairings,
+        metadata,
+        ["OUT1", "BACK1", "OUT2", "BACK2"],
+        validator=independent_pairing_validator(rules),
+    )
+
+    assert not built.rejected
+    assert len(built.columns) == 2
+    assert all(column.is_multi_day for column in built.columns)
+    assert all(column.num_duties == 2 for column in built.columns)
+    assert all(column.pairing_type == "multi_day" for column in built.columns)
+
+
+def test_adapter_rejects_multiday_candidate_that_fails_independent_rest_check():
+    import independent_validator as iv
+    from crew_recovery.pairing_columns import (
+        build_pairing_columns,
+        independent_pairing_validator,
+    )
+
+    rules = iv.Rules(fdp=iv.load_fdp(ROOT / "originals" / "fdp_rules.csv"))
+    outbound = _schedule_flight("OUT", "SIN", "KUL", "2026-10-25T09:00")
+    too_early_return = _schedule_flight("BACK", "KUL", "SIN", "2026-10-25T13:00")
+    built = build_pairing_columns(
+        [[outbound, too_early_return]],
+        [{"pairing_type": "multi_day", "num_sectors": 2, "num_duties": 2,
+          "is_multi_day": True, "layover_station": "KUL", "layover_hours": 3.0}],
+        ["OUT", "BACK"],
+        validator=independent_pairing_validator(rules),
+    )
+
+    assert built.columns == ()
+    assert len(built.rejected) == 1
+    assert "independent_validation_failed" in built.rejected[0].reason
+
+
+def test_validated_multiday_columns_match_exhaustive_full_pool_lp():
+    import independent_validator as iv
+    from crew_recovery.pairing_columns import (
+        build_pairing_columns,
+        independent_pairing_validator,
+    )
+
+    rules = iv.Rules(fdp=iv.load_fdp(ROOT / "originals" / "fdp_rules.csv"))
+    a_out = _schedule_flight("A_OUT", "SIN", "KUL", "2026-10-25T09:00")
+    a_back = _schedule_flight("A_BACK", "KUL", "SIN", "2026-10-26T08:00")
+    b_out = _schedule_flight("B_OUT", "SIN", "BKK", "2026-10-25T10:00")
+    b_back = _schedule_flight("B_BACK", "BKK", "SIN", "2026-10-26T09:00")
+    pairings = [[a_out, a_back], [b_out, b_back]]
+    metadata = [
+        {"pairing_type": "multi_day", "num_sectors": 2, "num_duties": 2,
+         "is_multi_day": True, "layover_station": "KUL", "layover_hours": 22.0},
+        {"pairing_type": "multi_day", "num_sectors": 2, "num_duties": 2,
+         "is_multi_day": True, "layover_station": "BKK", "layover_hours": 22.0},
+    ]
+    built = build_pairing_columns(
+        pairings, metadata, ["A_OUT", "A_BACK", "B_OUT", "B_BACK"],
+        validator=independent_pairing_validator(rules),
+    )
+    assert not built.rejected
+    universe = list(built.columns)
+    flights = ["A_OUT", "A_BACK", "B_OUT", "B_BACK"]
+    seed = [universe[0]]
+    penalty = len(flights) + 1
+
+    cg = run_finite_pool_column_generation(
+        flights, universe, initial_columns=seed, uncovered_penalty=penalty, batch_size=1
+    )
+    exhaustive = solve_restricted_master(flights, universe, penalty)
+
+    assert cg.converged
+    assert cg.solution.objective == pytest.approx(exhaustive.objective, abs=1e-8)
+    assert {c.column_id for c in cg.columns} == {c.column_id for c in universe}
+    assert all(v == pytest.approx(0.0, abs=1e-8) for v in cg.solution.uncovered_values.values())
