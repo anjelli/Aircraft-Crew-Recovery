@@ -78,3 +78,16 @@ The adapter does not call the top-level builder itself. The experiment runner re
 Tests construct two legal overnight pairings, pass them through the independent validator and adapter, then compare column generation seeded with one pairing against the direct restricted-master LP over the entire candidate universe. The test asserts equal LP objectives, full flight coverage, and retention of the multi-day metadata. A separate negative case confirms that a pairing with insufficient inter-duty rest is rejected.
 
 This benchmark verifies the adapter and finite-pool LP mechanics for the tested candidate universe. It does not yet verify that the top-level builder's complete output is exhaustive for an operational schedule, nor does it implement on-demand resource-constrained pricing. Those remain the next milestone after the adapter is connected to the actual experiment runner.
+
+
+## Stage 2 implementation — resource-constrained pricing prototype
+
+`src/crew_recovery/resource_constrained_pricing.py` adds an exact pricing oracle for a deliberately bounded pairing domain. It enumerates feasible duty paths subject to airport connectivity, minimum ground time, sector count, and FDP limits, then evaluates:
+- single-duty hub-to-hub pairings; and
+- two-duty hub-to-layover-to-hub pairings, including a first duty that contains a hub turnaround before reaching the layover station.
+
+Every complete candidate is passed through the independent pairing validator, including the overnight-rest, local-night, layover cap, and hub-turn equipment checks. The oracle scores candidates directly with current flight duals and returns only improving columns; it does not retain a full pairing-column universe.
+
+**Scope boundary:** this is exact only for the stated domain (at most two actual duties per pairing, the configured maximum sectors per duty, the supplied active schedule, and supplied layover stations). It does not price arbitrary multi-stop/multi-duty crew rosters, include reserve/positioning decisions, or prove integer optimality. Exactness claims require the oracle to finish its complete duty and pairing enumeration without an interruption or hidden candidate cap.
+
+Tiny-instance tests compare the generated pricing domain against a direct LP, verify an overnight pairing is discovered, and verify insufficient rest is rejected. The production-size run remains opt-in until the test suite and runtime are assessed.
