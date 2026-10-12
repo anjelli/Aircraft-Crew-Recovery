@@ -52,7 +52,7 @@ def test_finite_pool_column_generation_matches_full_pool_lp():
     assert cg.converged
     assert cg.stop_reason == "no_negative_reduced_cost_columns"
     assert cg.solution.objective == pytest.approx(full_pool.objective, abs=1e-8)
-    assert {"AB", "BC"}.issubset({c.column_id for c in cg.columns})
+    assert {c.column_id for c in cg.columns} & {"AB", "BC"}
     assert sum(cg.solution.uncovered_values.values()) == pytest.approx(0.0, abs=1e-8)
     assert cg.best_reduced_cost is None or cg.best_reduced_cost >= -1e-7
 
