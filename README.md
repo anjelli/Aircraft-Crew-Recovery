@@ -67,7 +67,7 @@ The revenue audit writes join-rate, unmatched-key, anomaly, and per-equipment re
 
 ## Column-generation research foundation
 
-An isolated LP research baseline has been added in `column_generation.py` on the `research/column-generation-foundation` branch. It solves a restricted master, reads flight-coverage duals, prices unseen pairings by reduced cost, and records convergence. Its current pricing oracle scans an explicitly supplied finite candidate pool; this is a controlled validation step, not yet a resource-constrained shortest-path pricing algorithm.
+An isolated LP research baseline lives in `column_generation.py`. It solves a restricted master, reads flight-coverage duals, prices unseen pairings by reduced cost, and records convergence. Its current pricing oracle scans an explicitly supplied finite candidate pool; this is a controlled validation step, not yet a resource-constrained shortest-path pricing algorithm. `src/crew_recovery/pairing_columns.py` adapts builder output into independently validated columns and preserves multi-day metadata.
 
 Run the focused tests with:
 
