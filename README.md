@@ -75,4 +75,12 @@ Run the focused tests with:
 python -m pytest -q tests/test_column_generation.py
 ```
 
+To run the optional builder-to-column integration and compare finite-pool column generation against the full-pool LP on the actual schedule, use:
+
+```bash
+python run_pairing_experiment.py --horizons 1W --column-generation-benchmark
+```
+
+This optional run independently validates the builder's generated candidates and writes an audit report to `output/column_generation/1w_benchmark.json`. It may be expensive for the one-month horizon. The benchmark certifies results only over the supplied validated candidate pool, not over pairings the builder did not generate.
+
 This module solves the **LP relaxation** for the supplied finite universe. It does not implement branch-and-price and cannot claim integer optimality. It must not be represented as the missing production recovery solver. The formulation and staged implementation gates are documented in `COLUMN_GENERATION_FOUNDATION.md`. The operational objective remains blocked until its decision variables and business assumptions are defined and validated.
