@@ -43,14 +43,14 @@ def test_aircraft_rotation_rejects_station_or_turnaround_discontinuity():
         _flight("F2", "BKK", "SIN", "2026-10-25T09:45"),
     ]
     aircraft = [Aircraft("TEST-TAIL-1", "320", "SIN", datetime.fromisoformat("2026-10-25T07:00"))]
-    with pytest.raises(ValueError, match="No aircraft can serve flight 'F2'"):
+    with pytest.raises(RuntimeError, match="did not prove an optimal feasible assignment"):
         solve_aircraft_rotations(flights, aircraft)
 
 
 def test_aircraft_rotation_requires_explicit_equipment_compatibility():
     flights = [_flight("F1", "SIN", "KUL", "2026-10-25T08:00", equipment="32N")]
     aircraft = [Aircraft("TEST-TAIL-1", "320", "SIN", datetime.fromisoformat("2026-10-25T07:00"))]
-    with pytest.raises(ValueError, match="No aircraft can serve flight 'F1'"):
+    with pytest.raises(ValueError, match="No aircraft has compatible equipment"):
         solve_aircraft_rotations(flights, aircraft)
     result = solve_aircraft_rotations(
         flights, aircraft, compatible_equipment={"320": ["320", "32N"]}
