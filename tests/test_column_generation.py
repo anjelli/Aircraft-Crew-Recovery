@@ -116,3 +116,29 @@ def test_pricing_excludes_active_columns_and_sorts_by_reduced_cost():
     assert priced[0][1] <= priced[1][1]
     assert all(column.column_id not in {"A", "B", "C"} for column, _ in priced)
     assert all(math.isfinite(rc) for _, rc in priced)
+
+
+
+def test_multiday_pairing_column_is_added_when_its_reduced_cost_is_improving():
+    # The IDs represent a legal overnight pairing already emitted by the
+    # pairing-generation/validation layer; legality is not inferred here.
+    flights = ["OUTBOUND", "RETURN"]
+    overnight = PairingColumn("overnight_pairing_17", ("OUTBOUND", "RETURN"), cost=1.0)
+    initial = [
+        PairingColumn("day_duty_out", ("OUTBOUND",), cost=1.0),
+        PairingColumn("day_duty_return", ("RETURN",), cost=1.0),
+    ]
+
+    result = run_finite_pool_column_generation(
+        flights,
+        [*initial, overnight],
+        initial_columns=initial,
+        uncovered_penalty=100.0,
+        batch_size=1,
+    )
+
+    assert result.converged
+    assert any(c.column_id == "overnight_pairing_17" for c in result.columns)
+    assert result.solution.objective == pytest.approx(1.0)
+    assert result.solution.uncovered_values["OUTBOUND"] == pytest.approx(0.0)
+    assert result.solution.uncovered_values["RETURN"] == pytest.approx(0.0)
