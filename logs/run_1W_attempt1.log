@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/home/claude/work/run_pairing_experiment.py", line 1017, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/claude/work/run_pairing_experiment.py", line 906, in main
+    schedule_path = find_file(ROOT, "schedule", ".xlsx")
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/claude/work/run_pairing_experiment.py", line 120, in find_file
+    raise FileNotFoundError(
+FileNotFoundError: Could not find schedule.xlsx. Put it in /home/claude/work/input or next to this script.
+exit=1 runtime=1s
