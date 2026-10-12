@@ -97,9 +97,20 @@ def independent_pairing_validator(rules, *, validator_module=None) -> PairingVal
 
     def validate(pairing: Pairing, metadata: Mapping[str, object]) -> Sequence[object]:
         splits = infer_duty_splits(pairing, metadata)
+        records = []
+        for flight in pairing:
+            record = dict(flight)
+            # The canonical builder consumes MGT_td; the independent validator
+            # consumes mgt_min. Normalize the representation without changing
+            # the source-of-truth builder records.
+            if record.get("mgt_min") is None and record.get("MGT_td") is not None:
+                mgt_td = record["MGT_td"]
+                if hasattr(mgt_td, "total_seconds"):
+                    record["mgt_min"] = float(mgt_td.total_seconds()) / 60.0
+            records.append(record)
         return validator_module.check_pairing(
             "generated-candidate",
-            list(pairing),
+            records,
             splits,
             rules,
         )
