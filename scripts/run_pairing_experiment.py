@@ -682,7 +682,7 @@ def output_filename(tag: str) -> str:
 
 
 
-def run_column_generation_benchmark(pairs, metadata, active_ids, ctx, tag: str):
+def run_column_generation_benchmark(pairs, metadata, active_ids, ctx, tag: str, existing_valid_cover=None):
     """Optional end-to-end adapter + finite-pool LP benchmark on builder output."""
     import independent_validator as iv
     from column_generation import run_finite_pool_column_generation, solve_restricted_master
@@ -697,9 +697,18 @@ def run_column_generation_benchmark(pairs, metadata, active_ids, ctx, tag: str):
         sorted(active_ids),
         validator=independent_pairing_validator(rules, validator_module=iv),
     )
+    candidate_union_cover = {fid for column in built.columns for fid in column.flight_ids}
+    existing_cover = set(existing_valid_cover or ()) & set(active_ids)
+    combined_union_cover = candidate_union_cover | existing_cover
     report = {
         "horizon": tag,
         "active_flights": len(active_ids),
+        "builder_candidate_union_covered_flights": len(candidate_union_cover),
+        "builder_candidate_union_uncovered_flights": len(set(active_ids) - candidate_union_cover),
+        "existing_valid_pairing_covered_flights": len(existing_cover),
+        "combined_candidate_and_existing_covered_flights": len(combined_union_cover),
+        "combined_candidate_and_existing_uncovered_flights": len(set(active_ids) - combined_union_cover),
+        "coverage_note": "Union coverage counts differ from LP slack counts because the LP selects fractional columns under equality constraints; the experiment summary unions all generated pairings with existing valid pairings.",
         "builder_candidates": len(pairs),
         "validated_columns": len(built.columns),
         "rejected_candidates": len(built.rejected),
@@ -943,7 +952,7 @@ def run_horizon(tag: str, name: str, base: pd.DataFrame, report_groups, ctx: dic
     generation_runtime = time.time() - builder_start
 
     if ctx.get("run_column_generation_benchmark", False):
-        run_column_generation_benchmark(pairs, metadata, active_ids, ctx, tag)
+        run_column_generation_benchmark(pairs, metadata, active_ids, ctx, tag, existing_valid_cover)
     if ctx.get("run_resource_constrained_pricing", False):
         run_resource_constrained_pricing(active, active_ids, ctx, tag)
 
