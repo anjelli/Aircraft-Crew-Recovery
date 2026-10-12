@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import logging
 import math
 import multiprocessing as mp
@@ -52,6 +53,7 @@ for _project_path in (PROJECT_ROOT, SRC_DIR):
 
 from crew_recovery.mgt_effective import apply_mgt_processing_by_arrival_date
 from crew_recovery.project_paths import input_file, original_file
+from crew_recovery.pairing_columns import build_pairing_columns, independent_pairing_validator
 
 LOG = logging.getLogger("pairing_experiment")
 
@@ -679,6 +681,66 @@ def output_filename(tag: str) -> str:
     }[tag]
 
 
+
+def run_column_generation_benchmark(pairs, metadata, active_ids, ctx, tag: str):
+    """Optional end-to-end adapter + finite-pool LP benchmark on builder output."""
+    import independent_validator as iv
+    from column_generation import run_finite_pool_column_generation, solve_restricted_master
+
+    rules = iv.Rules(
+        fdp=ctx["fdp"], dsb=ctx["dsb"], feb=ctx["feb"], deb=ctx["deb"],
+        max_layover_h=MAX_LAYOVER_HOURS_DEMO,
+    )
+    built = build_pairing_columns(
+        pairs,
+        metadata,
+        sorted(active_ids),
+        validator=independent_pairing_validator(rules, validator_module=iv),
+    )
+    report = {
+        "horizon": tag,
+        "active_flights": len(active_ids),
+        "builder_candidates": len(pairs),
+        "validated_columns": len(built.columns),
+        "rejected_candidates": len(built.rejected),
+        "duplicate_sequences": built.duplicate_sequences,
+        "multi_day_columns": sum(c.is_multi_day for c in built.columns),
+        "status": "ADAPTER_ONLY_NO_COLUMNS" if not built.columns else "ADAPTER_VALIDATED",
+        "lp_benchmark": None,
+    }
+    if built.columns:
+        universe = list(built.columns)
+        # A small seed is used deliberately; pricing scans the full validated
+        # pool, while the direct LP provides the finite-universe reference.
+        seed = [c for c in universe if not c.is_multi_day][:50]
+        if not seed:
+            seed = universe[:min(50, len(universe))]
+        penalty = float(len(active_ids) + 1)
+        cg = run_finite_pool_column_generation(
+            sorted(active_ids), universe, initial_columns=seed,
+            uncovered_penalty=penalty, batch_size=50, max_iterations=100,
+        )
+        full = solve_restricted_master(sorted(active_ids), universe, penalty)
+        report["lp_benchmark"] = {
+            "seed_columns": len(seed),
+            "columns_added": len(cg.columns) - len(seed),
+            "columns_in_final_master": len(cg.columns),
+            "iterations": cg.iterations,
+            "converged_over_supplied_pool": cg.converged,
+            "stop_reason": cg.stop_reason,
+            "column_generation_objective": cg.solution.objective,
+            "full_pool_lp_objective": full.objective,
+            "objective_matches_full_pool": abs(cg.solution.objective - full.objective) <= 1e-7,
+            "uncovered_flights": sum(v > 1e-7 for v in cg.solution.uncovered_values.values()),
+        }
+    out = OUTPUT_DIR / "column_generation" / f"{tag.lower()}_benchmark.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2, sort_keys=True, default=str), encoding="utf-8")
+    LOG.info("Column-generation benchmark report: %s", out)
+    LOG.info("Column-generation benchmark status: %s", report["status"])
+    return report
+
+
 # --------------------------------------------------------------------------------------
 # Single horizon
 # --------------------------------------------------------------------------------------
@@ -795,6 +857,9 @@ def run_horizon(tag: str, name: str, base: pd.DataFrame, report_groups, ctx: dic
         raise RuntimeError(f"Original pairings_builder failed for {name}: {type(exc).__name__}: {exc}") from exc
     generation_runtime = time.time() - builder_start
 
+    if ctx.get("run_column_generation_benchmark", False):
+        run_column_generation_benchmark(pairs, metadata, active_ids, ctx, tag)
+
     disruption_lookup = {
         r["flight_id"]: ("CANCELLED" if not r["active"] else r["disruption_status"])
         for r in proc.to_dict("records")
@@ -858,6 +923,10 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--horizons", default="1W,1M",
         help="Comma-separated horizons to run: 1W, 1M. Default: both.",
+    )
+    ap.add_argument(
+        "--column-generation-benchmark", action="store_true",
+        help="Adapt independently validated builder output into pairing columns and compare finite-pool CG against the full-pool LP. May be expensive for 1M.",
     )
     args = ap.parse_args(argv)
 
@@ -968,6 +1037,7 @@ def main(argv=None) -> int:
         "subtypes": subtypes,
         "layover_stations": layover_stations,
         "checker": checker,
+        "run_column_generation_benchmark": args.column_generation_benchmark,
     }
     groups = group_report(report)
 
