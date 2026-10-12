@@ -18,6 +18,7 @@ This document describes the repository's current code layout. This change moves 
 | `independent_validator.py` | Independently checks pairing legality using rule data and documented assumptions; it intentionally does not import the supplied pairing builder or MGT implementation. |
 | `mgt_effective.py` | Filters MGT rules by inclusive effective dates and ISO weekday frequency for each local arrival date, then delegates rule matching to the supplied MGT implementation. |
 | `objective_spec.py` | Defines and validates the requested four-component objective contract. It is an interface/readiness contract, not a connected production optimization solver. |
+| `pairing_columns.py` | Converts canonical builder output into stable, independently validated LP columns while preserving multi-day metadata. |
 | `project_paths.py` | Resolves canonical source files from `originals/` and prepared files from `input/`, avoiding accidental fallback to stale root copies. |
 
 ## Runnable scripts: `scripts/`

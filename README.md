@@ -67,12 +67,20 @@ The revenue audit writes join-rate, unmatched-key, anomaly, and per-equipment re
 
 ## Column-generation research foundation
 
-An isolated LP research baseline has been added in `column_generation.py` on the `research/column-generation-foundation` branch. It solves a restricted master, reads flight-coverage duals, prices unseen pairings by reduced cost, and records convergence. Its current pricing oracle scans an explicitly supplied finite candidate pool; this is a controlled validation step, not yet a resource-constrained shortest-path pricing algorithm.
+An isolated LP research baseline lives in `column_generation.py`. It solves a restricted master, reads flight-coverage duals, prices unseen pairings by reduced cost, and records convergence. Its current pricing oracle scans an explicitly supplied finite candidate pool; this is a controlled validation step, not yet a resource-constrained shortest-path pricing algorithm. `src/crew_recovery/pairing_columns.py` adapts builder output into independently validated columns and preserves multi-day metadata.
 
 Run the focused tests with:
 
 ```bash
 python -m pytest -q tests/test_column_generation.py
 ```
+
+To run the optional builder-to-column integration and compare finite-pool column generation against the full-pool LP on the actual schedule, use:
+
+```bash
+python run_pairing_experiment.py --horizons 1W --column-generation-benchmark
+```
+
+This optional run independently validates the builder's generated candidates and writes an audit report to `output/column_generation/1w_benchmark.json`. It may be expensive for the one-month horizon. The benchmark certifies results only over the supplied validated candidate pool, not over pairings the builder did not generate.
 
 This module solves the **LP relaxation** for the supplied finite universe. It does not implement branch-and-price and cannot claim integer optimality. It must not be represented as the missing production recovery solver. The formulation and staged implementation gates are documented in `COLUMN_GENERATION_FOUNDATION.md`. The operational objective remains blocked until its decision variables and business assumptions are defined and validated.
