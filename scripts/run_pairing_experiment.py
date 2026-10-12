@@ -44,7 +44,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-PROJECT_ROOT = PROJECT_ROOTs[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 for _project_path in (PROJECT_ROOT, SRC_DIR):
     if str(_project_path) not in sys.path:
@@ -55,7 +55,7 @@ from crew_recovery.project_paths import input_file, original_file
 
 LOG = logging.getLogger("pairing_experiment")
 
-ROOT = Path(__file__).resolve().parent
+ROOT = PROJECT_ROOT
 OUTPUT_DIR = ROOT / "output"
 
 SEED = 2026
