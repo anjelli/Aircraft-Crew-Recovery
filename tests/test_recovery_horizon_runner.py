@@ -7,7 +7,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from run_recovery_horizon import _horizon_frame, export_horizon
+from run_recovery_horizon import _canonical_schedule, _horizon_frame, export_horizon
 
 
 def _schedule(days=155):
@@ -56,3 +56,32 @@ def test_horizon_export_is_explicitly_blocked_and_exports_all_deliverables(tmp_p
     flight_plan = pd.read_csv(tmp_path / "flight_level_recovery.csv")
     assert set(flight_plan["recovery_action"]) == {"UNRESOLVED"}
     assert set(flight_plan["recovery_status"]) == {"BLOCKED_NOT_OPTIMIZED"}
+
+
+def test_canonical_schedule_drops_exact_duplicate_rows(tmp_path):
+    schedule = pd.DataFrame([
+        {
+            "Day": "2026-10-25",
+            "STD": "2026-10-25 18:55:00",
+            "STA": "2026-10-25 22:55:00",
+            "Eqp": "32N",
+            "Flt Num": 905,
+            "From": "MFM",
+            "To": "SIN",
+        },
+        {
+            "Day": "2026-10-25",
+            "STD": "2026-10-25 18:55:00",
+            "STA": "2026-10-25 22:55:00",
+            "Eqp": "32N",
+            "Flt Num": 905,
+            "From": "MFM",
+            "To": "SIN",
+        },
+    ])
+    schedule_path = tmp_path / "schedule.xlsx"
+    schedule.to_excel(schedule_path, index=False)
+
+    canonical = _canonical_schedule(schedule_path)
+    assert len(canonical) == 1
+    assert canonical["flight_id"].nunique() == 1

@@ -42,6 +42,7 @@ def _canonical_schedule(path: Path) -> pd.DataFrame:
     invalid = frame[["service_date", "STD", "STA"]].isna().any(axis=1)
     if invalid.any():
         raise ValueError(f"Canonical schedule has {int(invalid.sum())} invalid date/time rows")
+    frame = frame.drop_duplicates(subset=[date_col, "STD", "STA", "Eqp", "Flt Num", "From", "To"]).copy()
     frame["flight_id"] = (
         frame["Flt Num"].astype(str).str.replace(r"\.0$", "", regex=True)
         + "_" + frame["STD"].dt.strftime("%Y%m%dT%H%M%S")
