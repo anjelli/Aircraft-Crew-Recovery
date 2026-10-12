@@ -45,9 +45,8 @@ def test_find_duties_continues_after_late_arriving_candidate(tmp_path):
     find_duties = builder["find_duties"]
     get_band = builder["get_time_band_key"]
 
-    # From the same station, the 09:10 flight arrives after the latest
-    # allowable arrival, while the later-departing 09:20 flight is much
-    # shorter and fits. STD order therefore does not imply STA order.
+    # Both candidates depart from KUL in STD order, but the second is shorter
+    # and arrives before the two-sector FDP limit.
     first = _flight("START", "SIN", "KUL", "2026-10-25T08:00", "2026-10-25T08:30")
     long = _flight("LONG", "KUL", "BKK", "2026-10-25T09:10", "2026-10-25T13:00")
     short = _flight("SHORT", "KUL", "BKK", "2026-10-25T09:20", "2026-10-25T09:40")
@@ -59,12 +58,11 @@ def test_find_duties_continues_after_late_arriving_candidate(tmp_path):
         group.sort(key=lambda f: f["STD"])
     stds = {station: [f["STD"] for f in group] for station, group in by_origin.items()}
 
-    # Large single-sector limit but a 1-hour two-sector limit: START+LONG
-    # is too long, START+SHORT remains legal. Buffers are zero.
-    limits = {band: [1.0, 1.0, 6.0, 8.0] for band in (
+    # The duty starts at 08:00. A 2-sector limit of 1.75h rejects LONG
+    # (5h total) but permits SHORT (1h40m total).
+    limits = {band: [1.0, 1.75, 6.0, 8.0] for band in (
         "0600-0759", "0800-1459", "1500-2159", "2200-0559"
     )}
-    limits["0800-1459"] = [1.0, 1.0, 6.0, 8.0]
 
     duties = list(find_duties(
         from_groups=by_origin,
