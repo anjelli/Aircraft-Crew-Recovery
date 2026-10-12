@@ -104,10 +104,15 @@ def test_exact_pricer_rejects_multi_day_pairing_with_insufficient_rest():
         flight("OUT", "SIN", "KUL", "2026-10-25T09:00"),
         flight("BACK", "KUL", "SIN", "2026-10-25T13:00"),
     ]
+    # A same-day hub turnaround with a different equipment type is invalid;
+    # the only remaining pairing interpretation is a multi-day pairing, whose
+    # inter-duty rest is too short.
+    flights[1]["Eqp"] = "787"
     pricer = make_pricer(flights)
     batch = pricer({"OUT": 100.0, "BACK": 100.0}, frozenset(), 1e-7, 100)
 
     assert not any(c.is_multi_day for c in batch.columns)
+    assert batch.columns == ()
     assert batch.certified_no_improving_column
 
 
