@@ -1,7 +1,7 @@
 import sys, importlib.util
 from datetime import datetime, timedelta
 from pathlib import Path
-import pandas as pd, pytest
+import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]; sys.path.insert(0, str(ROOT))
 import independent_validator as iv
 O = ROOT / "originals"
@@ -108,11 +108,13 @@ def test_disruption_is_reproducible_and_in_range():
     orig = s.set_index("flight_id").loc[a.flight_id]["STD"].values        # original schedule object untouched
     assert (s["STD"].values == s["STD"].values).all() and len(orig) == len(a)
 
-# ---------- integration regression pinned to measured numbers (skipped if outputs absent)
-@pytest.mark.skipif(not (ROOT/"output"/"baseline"/"baseline_summary.json").exists(), reason="run run_baseline_validation.py first")
+# ---------- integration regression pinned to immutable historical fixture
 def test_baseline_numbers_pinned():
     import json
-    b = json.load(open(ROOT/"output"/"baseline"/"baseline_summary.json"))
+
+    fixture = ROOT / "tests" / "fixtures" / "baseline_summary.json"
+    with fixture.open(encoding="utf-8") as handle:
+        b = json.load(handle)
     assert b["schedule_flights"] == 19238
     assert b["baseline_full_155d"]["pairings_checked"] == 8473 and b["baseline_full_155d"]["unmatched"] == 0
     assert b["baseline_full_155d"]["by_type"] == {"MAX_LAYOVER": 27, "MGT_RULE_MISSING": 2}

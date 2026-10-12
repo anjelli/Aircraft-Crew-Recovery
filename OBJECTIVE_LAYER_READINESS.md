@@ -4,7 +4,7 @@ Status: the revenue audit and objective interface are implemented. Integration o
 
 ## 1. Solver inventory
 
-The current repository contains experiment runners, pairing validation, and an archived file at patches/mip.py.orig. It does not contain active source for the production column-generation / aircraft-timeline solver described in the meeting and handoff materials. The generic MIP has binary pairing-selection variables x_p and uncovered-flight slack u_f:
+The current repository contains experiment runners, pairing validation, and an archived file at archive/coverage_mip.py. It does not contain active source for the production column-generation / aircraft-timeline solver described in the meeting and handoff materials. The generic MIP has binary pairing-selection variables x_p and uncovered-flight slack u_f:
 
 \[
 \sum_p A_{fp}x_p + u_f = 1,\qquad
@@ -81,6 +81,7 @@ There is no defensible operational objective value or cost delta until the real 
 ## Reproduction
 
 \`\`\`bash
+python setup_workspace.py
 python revenue_audit.py
 python objective_layer_readiness.py
 python -m pytest -q tests

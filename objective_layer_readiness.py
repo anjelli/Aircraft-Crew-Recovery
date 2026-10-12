@@ -55,8 +55,8 @@ def run(repo_root,output_dir):
  costs=load_cost_parameters(cost) if cost else {};found=[x for x in CANDIDATES if (root/x).is_file()]
  baseline,summaries=baseline_breakdown(root);components=readiness_rows(costs)
  report={"operational_solver_present":bool(found),"operational_solver_files_found":found,"files_checked":list(CANDIDATES),
-  "archived_generic_mip_present":(root/"patches"/"mip.py.orig").is_file(),
-  "finding":"No active production column-generation/aircraft-timeline solver found. patches/mip.py.orig is an archived generic coverage MIP, not the operational solver.",
+  "archived_generic_mip_present":(root/"archive"/"coverage_mip.py").is_file(),
+  "finding":"No active production column-generation/aircraft-timeline solver found. archive/coverage_mip.py is an archived generic coverage MIP, not the operational solver.",
   "cost_parameter_file":str(cost) if cost else None,"cost_parameters_loaded":len(costs),"four_term_objective_status":"BLOCKED_NOT_RUN",
   "baseline_summaries_found":sorted(summaries),"objective_contract":objective_contract()}
  out=Path(output_dir);out.mkdir(parents=True,exist_ok=True)
