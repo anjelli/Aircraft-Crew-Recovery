@@ -79,6 +79,9 @@ To run the optional builder-to-column integration and compare finite-pool column
 
 ```bash
 python run_pairing_experiment.py --horizons 1W --column-generation-benchmark
+
+# Experimental exact pricing over the declared single-/two-duty pairing domain
+python run_pairing_experiment.py --horizons 1W --resource-constrained-pricing
 ```
 
 This optional run independently validates the builder's generated candidates and writes an audit report to `output/column_generation/1w_benchmark.json`. It may be expensive for the one-month horizon. The benchmark certifies results only over the supplied validated candidate pool, not over pairings the builder did not generate.
