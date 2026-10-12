@@ -10,6 +10,16 @@ This repository contains a prototype crew-pairing validation and disruption expe
 
 Run `python setup_workspace.py` to build `input/schedule.xlsx` and `input/pairing_report.xlsx`. The schedule preparation removes exact duplicate rows using all columns except the export-only `Unnamed: 0` index column, and records duplicate rows under `output/audit/`. The pairing report is copied unchanged. Runtime code resolves source files only from `originals/` and prepared files only from `input/`; it does not silently select root-level or numbered filename variants.
 
+## Code layout
+
+- `src/crew_recovery/`: reusable validation, MGT effective-date handling, objective-contract, and path modules.
+- `scripts/`: workspace setup, input preparation, disruption experiments, revenue audit, and objective-readiness report.
+- Root-level Python names remain as small compatibility wrappers, so existing commands and imports still work.
+- `tests/`: regression tests; `originals/`: supplied source-of-truth code and input artifacts; `patches/`: historical `.orig` snapshots, not active modules.
+- `input/` and `output/` retain their existing roles; no schedule, rules, historical result, or output files are moved by this organization change.
+
+See [`docs/CODEBASE_MAP.md`](docs/CODEBASE_MAP.md) for a file-by-file explanation and suggested execution flow.
+
 ## MGT effective dates
 
 The supplied `MGT.py` handles rule specificity and arrival-time windows but does not filter rules by `Start Date`, `End Date`, or `Freq`. The experiment adapter therefore filters the rule table separately for each flight's local scheduled arrival date before calling the supplied implementation.
