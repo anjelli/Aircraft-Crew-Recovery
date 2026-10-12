@@ -16,78 +16,64 @@ That formulation is a coverage baseline. It does not model individual crew roste
 
 This repository currently has candidate **pairings**: feasible sequences of flights produced by `pairings_builder.py`. A pairing column covers the flights in that sequence. It is not automatically a complete crew set or a crew roster across the recovery horizon.
 
-For the first research milestone, pairing columns can support a column-generation **LP relaxation baseline** for the existing coverage objective. This validates the restricted master, dual values, reduced-cost arithmetic, and convergence on a finite candidate universe. It must be labelled a finite-pool benchmark because pricing by scanning all candidates does not remove the expense of generating the full universe.
+For the first research milestone, pairing columns support a column-generation **LP relaxation baseline** for the coverage objective. The restricted master, dual values, reduced-cost arithmetic, and convergence must be validated separately from the pairing enumerator.
 
 The eventual operational formulation must decide whether columns represent:
 - a duty/pairing (appropriate only for the pairing-cover subproblem); or
-- a complete feasible crew set / aircraft-compatible timeline (required if the master is to enforce roster or tail trackability end-to-end).
+- a complete feasible crew set / aircraft-compatible timeline (required if the master must enforce roster or tail trackability end-to-end).
 
 Do not claim the second formulation is implemented until its source data and constraints are available.
 
-## Proposed staged path
+## Current implementation
 
-### Stage 1 — mathematical validation
+- `column_generation.py`: restricted-master coverage LP, dual prices, reduced-cost calculation, and finite-pool baseline.
+- `src/crew_recovery/integrated_column_generation.py`: loop that solves the restricted master, calls pricing, validates returned columns and distinguishes certified from inconclusive stopping.
+- `src/crew_recovery/resource_constrained_pricing.py`: on-demand duty enumeration and pricing for single-duty hub turnarounds and two-duty hub–layover–hub pairings.
+- `src/crew_recovery/independent_validator.py`: independent legality checks for completed candidates.
+- `tests/test_resource_constrained_pricing.py`: targeted overnight, rest, and integrated-LP tests.
+- `tests/test_resource_constrained_pricing_exhaustive.py`: brute-force reference enumerator for tiny schedules. It must not call the production pricer to construct its reference universe.
 
-1. Keep the current coverage MIP and all source input files unchanged.
-2. Add an isolated restricted-master LP using continuous nonnegative pairing variables and uncovered-flight slack.
-3. Start with a small seed set; solve the LP; read flight-coverage duals.
-4. Price each unseen finite-pool pairing with reduced cost
-   \[
-   \bar c_p = c_p - \sum_{f\in p}\pi_f.
-   \]
-   Add columns with reduced cost below a documented negative tolerance.
-5. Stop only when the pricing oracle certifies that no unseen column in the finite pool has negative reduced cost, or report iteration/time limit.
-6. Test the LP objective against a direct LP over the entire finite pool on toy instances. Check dual signs and reduced costs with hand-calculated examples.
+The pricing oracle is exact only over its declared bounded domain: at most two actual duties per pairing, the configured maximum sectors per duty, the supplied active schedule, and supplied layover stations. It does not price arbitrary multi-duty rosters, reserve/positioning decisions, or prove integer optimality.
 
-This establishes correct column-generation mechanics, not a scalable resource-constrained pricing algorithm or an integer-optimal crew recovery solver.
+## Validation gates
 
-### Stage 2 — real pricing
+### Gate A — independent exhaustive pricing
 
-Replace the finite-pool scan with a network pricing oracle that constructs promising legal duties during pricing instead of first materializing all of them. Reuse the adjacency/time arithmetic and independent legality validator only after reconciling rule semantics. The pricing state must include all resources required for legal continuation, including location, time, sector count, duty/FDP budget, equipment/connection restrictions, and rest/layover state when multi-duty strings are priced.
+On tiny schedules, enumerate flight permutations independently of the production pricer. Apply the documented connectivity, MGT, sector, FDP, layover, and independent-validator checks; compare legal pairing sequences and duty-split contracts against the production oracle.
 
-A learned model may rank promising arcs, states, or partial strings, but it must not be the legality authority. Run exact pricing periodically or use a certified bound if claiming LP optimality. If pricing is heuristic-only, mark the run as heuristic and do not claim convergence to the full LP optimum.
+The permanent test suite should include:
+- multiple feasible connections and at least one disconnected/invalid alternative;
+- a legal overnight pairing and an insufficient-rest rejection;
+- negative, zero, and positive reduced-cost cases;
+- the case where every improving candidate is already active;
+- a check that convergence is certified only when no **unseen** improving column remains.
 
-### Stage 3 — integer recovery
+The brute-force reference is factorial and is intended only for tiny test instances. A matching candidate universe validates the bounded enumerator; it does not establish correctness for pairings outside the declared domain or resolve business-rule assumptions.
 
-Column generation of the LP relaxation alone does **not** guarantee an optimal integer solution. An integer master over only the columns generated by root-node LP pricing is a restricted-master incumbent, not a proof of integer optimality. Exact integer optimization over a huge implicit column set requires branch-and-price (or another explicitly validated integer strategy).
+### Gate B — LP arithmetic
 
-### Stage 4 — operational objective and integration
+Compare column generation against a direct LP over the independently generated tiny-instance universe. Use hand-checkable reduced costs and multiple dual-price vectors. The LP objective and selected coverage/slack behavior should agree within numerical tolerance.
 
-The current `objective_spec.py` intentionally disables revenue-derived cancellation cost and documents missing decision variables for retiming, crew efficiency, and distinct crew-set count. Keep those terms blocked until the required decisions, confirmed units, route/equipment joins, business priorities, and crew-set definitions are available. Do not reinterpret uncovered-flight slack as cancellation, pairing count as crew-set count, or arbitrary pairing cost as operational cost.
+### Gate C — real-schedule audit
+
+For the one-week experiment, report flight IDs with positive LP slack, candidate coverage by flight, and the selected LP variables. Reconcile candidate-union coverage with LP slack; they are different metrics and should not be conflated. Keep the one-week report reproducible.
+
+### Gate D — scale-up
+
+Only after Gates A–C pass, benchmark larger horizons. Record pricing runtime, restricted-master runtime, memory, candidate counts, iterations, best reduced cost, and the stop reason. Do not infer scalability from the pricing-oracle runtime alone because the experiment runner also executes the canonical builder.
+
+## Integer recovery and operational objective
+
+Column generation of the LP relaxation alone does **not** guarantee an optimal integer solution. An integer master over only columns generated at the root is a restricted-master incumbent, not a proof of integer optimality. Exact integer optimisation over a large implicit column set requires branch-and-price or another explicitly validated integer strategy.
+
+The current `objective_spec.py` intentionally disables revenue-derived cancellation cost and documents missing decision variables for retiming, crew efficiency, and distinct crew-set count. Keep these terms blocked until the required decisions, confirmed units, route/equipment joins, business priorities, and crew-set definitions are available. Do not reinterpret uncovered-flight slack as cancellation, pairing count as crew-set count, or arbitrary pairing cost as operational cost.
 
 ## Acceptance gates
 
 - Existing baseline files and outputs remain reproducible.
-- Toy finite-pool LP results match the direct full-pool LP objective within numeric tolerance.
-- Each generated column passes independent legality checks and contains only active, in-horizon flight IDs.
+- Every generated column passes independent legality checks and contains only active, in-horizon flight IDs.
+- Tiny-instance exhaustive enumeration agrees with the production pricer on the declared domain.
+- Tiny-instance column generation agrees with the direct LP over that independently enumerated universe.
 - Logs report iterations, LP objective, columns added, best reduced cost, pricing status, and stop reason.
 - LP optimality, integer optimality, and heuristic status are reported separately.
-- No operational objective component is reported as evaluated unless the corresponding decision variables and validated coefficients are actually present.
-
-
-## Phase 1 — validated builder-to-column adapter
-
-`src/crew_recovery/pairing_columns.py` converts the existing builder's pairing records and metadata into stable `PairingColumn` objects. It preserves `pairing_type`, `is_multi_day`, and `num_duties`; rejects candidates containing inactive/unknown flight IDs; and requires an independent-validator callback before admitting a candidate. The helper `independent_pairing_validator` delegates to `src/crew_recovery/independent_validator.py`.
-
-Duty splits are inferred only for supported builder metadata: `single_day`, simple two-sector `multi_day`, and combined pairings with an explicit layover station. Ambiguous split inference fails closed. If upstream metadata can provide exact `duty_splits`, those are preferred. Candidates rejected by the independent validator are returned in the build report with reasons rather than silently included.
-
-The adapter does not call the top-level builder itself. The experiment runner remains responsible for preparing schedule/rule data and calling the canonical builder with the appropriate horizon and settings. This keeps data loading and pairing generation in their existing locations.
-
-## Phase 2 — exhaustive tiny-instance benchmark
-
-Tests construct two legal overnight pairings, pass them through the independent validator and adapter, then compare column generation seeded with one pairing against the direct restricted-master LP over the entire candidate universe. The test asserts equal LP objectives, full flight coverage, and retention of the multi-day metadata. A separate negative case confirms that a pairing with insufficient inter-duty rest is rejected.
-
-This benchmark verifies the adapter and finite-pool LP mechanics for the tested candidate universe. It does not yet verify that the top-level builder's complete output is exhaustive for an operational schedule, nor does it implement on-demand resource-constrained pricing. Those remain the next milestone after the adapter is connected to the actual experiment runner.
-
-
-## Stage 2 implementation — resource-constrained pricing prototype
-
-`src/crew_recovery/resource_constrained_pricing.py` adds an exact pricing oracle for a deliberately bounded pairing domain. It enumerates feasible duty paths subject to airport connectivity, minimum ground time, sector count, and FDP limits, then evaluates:
-- single-duty hub-to-hub pairings; and
-- two-duty hub-to-layover-to-hub pairings, including a first duty that contains a hub turnaround before reaching the layover station.
-
-Every complete candidate is passed through the independent pairing validator, including the overnight-rest, local-night, layover cap, and hub-turn equipment checks. The oracle scores candidates directly with current flight duals and returns only improving columns; it does not retain a full pairing-column universe.
-
-**Scope boundary:** this is exact only for the stated domain (at most two actual duties per pairing, the configured maximum sectors per duty, the supplied active schedule, and supplied layover stations). It does not price arbitrary multi-stop/multi-duty crew rosters, include reserve/positioning decisions, or prove integer optimality. Exactness claims require the oracle to finish its complete duty and pairing enumeration without an interruption or hidden candidate cap.
-
-Tiny-instance tests compare the generated pricing domain against a direct LP, verify an overnight pairing is discovered, and verify insufficient rest is rejected. The production-size run remains opt-in until the test suite and runtime are assessed.
+- No operational objective component is reported as evaluated unless its decision variables and validated coefficients are present.
