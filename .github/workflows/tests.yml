@@ -23,8 +23,22 @@ jobs:
         run: python revenue_audit.py
       - name: Decompose coverage baseline and report solver readiness
         run: python objective_layer_readiness.py
+      - name: Run full-horizon readiness audit
+        run: python scripts/audit_full_horizon_readiness.py --output output/audit/full_horizon_readiness.json
+      - name: Run one-week resource-constrained pricing audit
+        run: python run_pairing_experiment.py --horizons 1W --resource-constrained-pricing
       - name: Run regression tests
         run: python -m pytest -q tests
+      - name: Upload recovery audit artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-audit
+          path: |
+            output/audit/full_horizon_readiness.json
+            output/column_generation/1w_solution_audit/
+            output/column_generation/1w_resource_constrained_pricing.json
+            output/pairing_experiment_1_week.xlsx
+          if-no-files-found: error
       - name: Upload revenue/objective audit artifacts
         uses: actions/upload-artifact@v4
         with:
