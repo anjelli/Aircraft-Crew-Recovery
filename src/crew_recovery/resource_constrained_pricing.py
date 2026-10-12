@@ -171,8 +171,10 @@ class ResourceConstrainedPairingPricer:
                 if self._duty_feasible(extended):
                     visit(extended)
 
+        allowed_starts = {self.hub} | set(self.layover_stations)
         for flight in self.flights:
-            visit((flight,))
+            if self._airport(flight, "From") in allowed_starts:
+                visit((flight,))
         self._duties = tuple(duties.values())
         return self._duties
 
