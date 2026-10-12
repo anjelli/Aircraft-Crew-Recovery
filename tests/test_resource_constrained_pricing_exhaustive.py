@@ -165,6 +165,7 @@ def test_pricer_matches_independent_exhaustive_pairing_universe():
     flights = [
         flight("S-K", "SIN", "KUL", "2026-10-25T09:00"),
         flight("S-B", "SIN", "BKK", "2026-10-25T10:00"),
+        flight("K-S-DAY", "KUL", "SIN", "2026-10-25T11:30"),
         flight("K-S", "KUL", "SIN", "2026-10-26T08:00"),
         flight("B-S", "BKK", "SIN", "2026-10-26T09:00"),
         flight("K-B", "KUL", "BKK", "2026-10-25T12:00"),
