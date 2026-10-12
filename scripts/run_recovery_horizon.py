@@ -189,9 +189,10 @@ def main() -> int:
     args = parser.parse_args()
 
     schedule = _canonical_schedule(Path(args.schedule))
-    exceptions, readiness = _readiness(schedule, Path(args.mgt), Path(args.aircraft_lines))
     results = []
     for horizon in args.horizons:
+        selected = _horizon_frame(schedule, horizon)
+        exceptions, readiness = _readiness(selected, Path(args.mgt), Path(args.aircraft_lines))
         results.append(export_horizon(schedule, horizon, Path(args.output_root) / horizon, exceptions, readiness))
     report = {"runs": results, "overall_status": "BLOCKED_NOT_OPTIMIZED" if any(r["status"] == "BLOCKED_NOT_OPTIMIZED" for r in results) else "READY_NOT_OPTIMIZED"}
     Path(args.output_root).mkdir(parents=True, exist_ok=True)
