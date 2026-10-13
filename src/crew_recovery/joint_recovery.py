@@ -1,9 +1,9 @@
 """Joint crew-pairing and aircraft-route MILP for operate/cancel recovery.
 
-This is the first coupled baseline: it jointly chooses validated pairing columns,
-flight cancellations, and aircraft paths. It intentionally does not yet create
-retimed flight copies. Optimality is only over the supplied pairing columns and
-the route arcs generated from the supplied flight/resource data.
+Aircraft route flow is aggregated by equipment class rather than duplicated for
+every tail. Selected source arcs identify each provisional resource; the unique
+flight-to-flight arcs then decompose into tail routes. This reduces the binary
+network while preserving resource-specific start station/time constraints.
 """
 from __future__ import annotations
 
@@ -62,20 +62,21 @@ def solve_joint_operate_cancel(
     """Jointly select crew pairings, cancellations and aircraft paths.
 
     Every flight is either covered by exactly one selected pairing and assigned
-    to exactly one aircraft, or cancelled. Aircraft start arcs must respect
-    declared start station/time; route arcs enforce station continuity, MGT and
-    equipment compatibility. Missing MGT or an unproven optimum fails closed.
+    to exactly one aircraft resource, or cancelled. Aircraft paths enforce
+    start station/time, equipment compatibility, station continuity and MGT.
+    The first solve proves the minimum cancellation count; the second fixes that
+    count and minimizes pairing costs plus resource start costs.
 
-    This baseline supports operate/cancel decisions only. Retiming must be
-    represented by explicit flight copies and is not silently approximated.
+    This baseline supports operate/cancel only. Retiming must be represented by
+    explicit flight copies and is not silently approximated. Optimality is only
+    over the supplied pairing columns and generated route arcs.
     """
     records = [dict(f) for f in flights]
     if not records:
         raise ValueError("flights must not be empty")
     ids = [str(f.get("flight_id", "")).strip() for f in records]
-    if any(not fid for fid in ids) or len(set(ids)) != len(ids):
+    if any(not fid for fid in ids) or len(ids) != len(set(ids)):
         raise ValueError("flight_id values must be unique and non-empty")
-    by_id = {str(f["flight_id"]): f for f in records}
     for f in records:
         for key in ("From", "To", "STD", "STA", "Eqp"):
             if f.get(key) is None:
@@ -84,12 +85,18 @@ def solve_joint_operate_cancel(
     records.sort(key=lambda f: (f["STD"], str(f["flight_id"])))
     ids = [str(f["flight_id"]) for f in records]
     index = {fid: i for i, fid in enumerate(ids)}
+    n_f = len(records)
+
     tails = list(aircraft)
     if not tails:
         raise ValueError("aircraft inventory must not be empty")
     tail_ids = [a.tail_id for a in tails]
     if len(tail_ids) != len(set(tail_ids)):
         raise ValueError("aircraft tail_id values must be unique")
+    classes = sorted({a.equipment for a in tails})
+    class_index = {eqp: i for i, eqp in enumerate(classes)}
+    tail_class = [class_index[a.equipment] for a in tails]
+    n_c = len(classes)
 
     columns = list(pairings)
     column_ids = [p.column_id for p in columns]
@@ -104,63 +111,66 @@ def solve_joint_operate_cancel(
         str(k).strip(): {str(v).strip() for v in values}
         for k, values in (compatible_equipment or {}).items()
     }
+    accepted = {
+        eqp: compatibility.get(eqp, {eqp})
+        for eqp in classes
+    }
     eligible = {
-        (a, i): str(records[i]["Eqp"]).strip()
-        in compatibility.get(tail.equipment, {tail.equipment})
-        for a, tail in enumerate(tails)
-        for i in range(len(records))
+        (c, i): str(records[i]["Eqp"]).strip() in accepted[eqp]
+        for c, eqp in enumerate(classes)
+        for i in range(n_f)
     }
     start_ok: dict[tuple[int, int], bool] = {}
     for a, tail in enumerate(tails):
-        available = tail.available_at
         for i, f in enumerate(records):
             start_ok[a, i] = (
-                eligible[a, i]
+                eligible[tail_class[a], i]
                 and str(f["From"]).strip().upper() == tail.start_station.strip().upper()
-                and f["STD"] >= available
+                and f["STD"] >= tail.available_at
             )
 
-    # Only chronologically feasible route arcs are materialized.
+    # A single route network per equipment class; each selected source arc
+    # starts one path from a specific resource, so tail identities are recovered
+    # by tracing selected arcs from those source flights.
     arcs: list[tuple[int, int, int]] = []
-    incoming: dict[tuple[int, int], list[int]] = {(a, i): [] for a in range(len(tails)) for i in range(len(records))}
-    outgoing: dict[tuple[int, int], list[int]] = {(a, i): [] for a in range(len(tails)) for i in range(len(records))}
-    for a, tail in enumerate(tails):
+    incoming: dict[tuple[int, int], list[int]] = {(c, i): [] for c in range(n_c) for i in range(n_f)}
+    outgoing: dict[tuple[int, int], list[int]] = {(c, i): [] for c in range(n_c) for i in range(n_f)}
+    for c, eqp in enumerate(classes):
         for i, first in enumerate(records):
-            if not eligible[a, i]:
+            if not eligible[c, i]:
                 continue
-            for j in range(i + 1, len(records)):
-                second = records[j]
-                if not eligible[a, j]:
+            for j in range(i + 1, n_f):
+                if not eligible[c, j]:
                     continue
-                if second["STD"] < first["STA"]:
+                if records[j]["STD"] < first["STA"]:
                     continue
-                if _can_follow(first, second):
-                    arc_index = len(arcs)
-                    arcs.append((a, i, j))
-                    outgoing[a, i].append(arc_index)
-                    incoming[a, j].append(arc_index)
+                if _can_follow(first, records[j]):
+                    k = len(arcs)
+                    arcs.append((c, i, j))
+                    outgoing[c, i].append(k)
+                    incoming[c, j].append(k)
 
-    # Variables: pairing selection x, cancellation c, aircraft assignment y,
-    # valid source arcs s, and aircraft route arcs z.
-    n_p, n_f, n_a = len(columns), len(records), len(tails)
+    # Variables: pairing selection x, cancellation c, class-flight y,
+    # resource-specific source arcs s, and equipment-class route arcs z.
+    n_p = len(columns)
     x0 = 0
-    c0 = x0 + n_p
-    y0 = c0 + n_f
-    s0 = y0 + n_a * n_f
-    source_keys = [(a, i) for a in range(n_a) for i in range(n_f) if start_ok[a, i]]
-    source_index = {key: s0 + k for k, key in enumerate(source_keys)}
-    z0 = s0 + len(source_keys)
-    arc_var = {k: z0 + k for k in range(len(arcs))}
-    n_var = z0 + len(arcs)
+    cancel0 = x0 + n_p
+    y0 = cancel0 + n_f
+    source_keys = [(a, i) for a in range(len(tails)) for i in range(n_f) if start_ok[a, i]]
+    source0 = y0 + n_c * n_f
+    source_index = {key: source0 + k for k, key in enumerate(source_keys)}
+    arc0 = source0 + len(source_keys)
+    arc_var = {k: arc0 + k for k in range(len(arcs))}
+    n_var = arc0 + len(arcs)
 
-    def yvar(a: int, i: int) -> int:
-        return y0 + a * n_f + i
+    def yvar(c: int, i: int) -> int:
+        return y0 + c * n_f + i
 
-    eq_rows = n_f + n_f + n_a * n_f
-    ub_rows = n_a * n_f + n_a
+    eq_rows = n_f + n_f + n_c * n_f
+    ub_rows = n_c * n_f + len(tails)
     a_eq = lil_matrix((eq_rows, n_var), dtype=float)
     b_eq = np.ones(eq_rows, dtype=float)
-    b_eq[2 * n_f:] = 0.0  # path-flow rows are equalities to zero
+    b_eq[2 * n_f:] = 0.0
     a_ub = lil_matrix((ub_rows, n_var), dtype=float)
     b_ub = np.zeros(ub_rows, dtype=float)
 
@@ -169,43 +179,49 @@ def solve_joint_operate_cancel(
         for fid in p.flight_ids:
             a_eq[index[fid], x0 + p_idx] = 1.0
     for i in range(n_f):
-        a_eq[i, c0 + i] = 1.0
+        a_eq[i, cancel0 + i] = 1.0
 
-    # Aircraft cover: aircraft assignment + the same cancellation variable = 1.
+    # Aircraft cover: exactly one equipment-class assignment or cancellation.
     aircraft_cover_row = n_f
     for i in range(n_f):
-        for a in range(n_a):
-            a_eq[aircraft_cover_row + i, yvar(a, i)] = 1.0
-        a_eq[aircraft_cover_row + i, c0 + i] = 1.0
+        for c in range(n_c):
+            a_eq[aircraft_cover_row + i, yvar(c, i)] = 1.0
+        a_eq[aircraft_cover_row + i, cancel0 + i] = 1.0
 
-    # Every assigned flight has one source or predecessor on its aircraft path.
+    # Each class-flight assignment has one source or predecessor.
     path_row0 = 2 * n_f
-    for a in range(n_a):
+    for c in range(n_c):
+        class_tails = [a for a in range(len(tails)) if tail_class[a] == c]
         for i in range(n_f):
-            row = path_row0 + a * n_f + i
-            a_eq[row, yvar(a, i)] = 1.0
-            if (a, i) in source_index:
-                a_eq[row, source_index[a, i]] = -1.0
-            for k in incoming[a, i]:
+            row = path_row0 + c * n_f + i
+            a_eq[row, yvar(c, i)] = 1.0
+            for a in class_tails:
+                if (a, i) in source_index:
+                    a_eq[row, source_index[a, i]] = -1.0
+            for k in incoming[c, i]:
                 a_eq[row, arc_var[k]] = -1.0
 
-    # At most one successor per assigned flight, and at most one path/source per tail.
-    for a in range(n_a):
+    # Each assigned flight has at most one successor. Each resource starts at
+    # most one path.
+    for c in range(n_c):
         for i in range(n_f):
-            row = a * n_f + i
-            a_ub[row, yvar(a, i)] = -1.0
-            for k in outgoing[a, i]:
+            row = c * n_f + i
+            a_ub[row, yvar(c, i)] = -1.0
+            for k in outgoing[c, i]:
                 a_ub[row, arc_var[k]] = 1.0
-        source_row = n_a * n_f + a
+    for a in range(len(tails)):
+        row = n_c * n_f + a
         for key, var in source_index.items():
             if key[0] == a:
-                a_ub[source_row, var] = 1.0
-        b_ub[source_row] = 1.0
+                a_ub[row, var] = 1.0
+        b_ub[row] = 1.0
 
     integrality = np.ones(n_var, dtype=int)
     bounds = Bounds(np.zeros(n_var), np.ones(n_var))
-    eq_constraint = LinearConstraint(a_eq.tocsr(), b_eq, b_eq)
-    ub_constraint = LinearConstraint(a_ub.tocsr(), -np.inf, b_ub)
+    constraints = [
+        LinearConstraint(a_eq.tocsr(), b_eq, b_eq),
+        LinearConstraint(a_ub.tocsr(), -np.inf, b_ub),
+    ]
     options = {"mip_rel_gap": 0.0}
     if time_limit_seconds is not None:
         if not isfinite(float(time_limit_seconds)) or time_limit_seconds <= 0:
@@ -214,54 +230,63 @@ def solve_joint_operate_cancel(
 
     # Pass 1: prove the minimum cancellation count.
     cancellation_objective = np.zeros(n_var, dtype=float)
-    cancellation_objective[c0:c0 + n_f] = 1.0
-    first = milp(
-        c=cancellation_objective,
-        integrality=integrality,
-        bounds=bounds,
-        constraints=[eq_constraint, ub_constraint],
-        options=options,
-    )
+    cancellation_objective[cancel0:cancel0 + n_f] = 1.0
+    first = milp(c=cancellation_objective, integrality=integrality, bounds=bounds, constraints=constraints, options=options)
     if first.x is None or first.status != 0:
         raise RuntimeError(f"Minimum-cancellation pass not proven optimal: {first.message}")
-    min_cancellations = int(round(float(np.sum(first.x[c0:c0 + n_f]))))
+    min_cancellations = int(round(float(np.sum(first.x[cancel0:cancel0 + n_f]))))
 
-    # Pass 2: freeze the cancellation optimum, then minimize pairing costs and
-    # aircraft start costs. This is a lexicographic second stage, not a big-M.
+    # Pass 2: fix the cancellation optimum before optimizing lower priorities.
     cancel_row = lil_matrix((1, n_var), dtype=float)
-    cancel_row[0, c0:c0 + n_f] = 1.0
+    for i in range(n_f):
+        cancel_row[0, cancel0 + i] = 1.0
     cancel_constraint = LinearConstraint(cancel_row.tocsr(), [min_cancellations], [min_cancellations])
     secondary = np.zeros(n_var, dtype=float)
     for p_idx, p in enumerate(columns):
         secondary[x0 + p_idx] = float(p.cost)
-    for key, var in source_index.items():
-        secondary[var] = float(tails[key[0]].start_cost)
+    for (a, _i), var in source_index.items():
+        secondary[var] = float(tails[a].start_cost)
     second = milp(
-        c=secondary,
-        integrality=integrality,
-        bounds=bounds,
-        constraints=[eq_constraint, ub_constraint, cancel_constraint],
-        options=options,
+        c=secondary, integrality=integrality, bounds=bounds,
+        constraints=constraints + [cancel_constraint], options=options,
     )
     if second.x is None or second.status != 0:
         raise RuntimeError(f"Secondary pass not proven optimal: {second.message}")
 
-    selected = tuple(
-        columns[p].column_id
-        for p in range(n_p)
-        if second.x[x0 + p] > 0.5
-    )
-    cancelled = tuple(
-        ids[i] for i in range(n_f) if second.x[c0 + i] > 0.5
-    )
-    aircraft_by_flight = {}
-    for i, fid in enumerate(ids):
-        if fid in cancelled:
-            continue
-        assigned = [tails[a].tail_id for a in range(n_a) if second.x[yvar(a, i)] > 0.5]
-        if len(assigned) != 1:
-            raise RuntimeError(f"Internal solution audit: {fid!r} has {len(assigned)} aircraft assignments")
-        aircraft_by_flight[fid] = assigned[0]
+    selected = tuple(columns[p].column_id for p in range(n_p) if second.x[x0 + p] > 0.5)
+    cancelled = tuple(ids[i] for i in range(n_f) if second.x[cancel0 + i] > 0.5)
+    selected_source = {
+        key: var for key, var in source_index.items() if second.x[var] > 0.5
+    }
+    selected_next = {}
+    for k, (c, i, j) in enumerate(arcs):
+        if second.x[arc_var[k]] > 0.5:
+            if i in selected_next:
+                raise RuntimeError(f"Internal solution audit: multiple successors for flight {ids[i]!r}")
+            selected_next[i] = j
+
+    aircraft_by_flight: dict[str, str] = {}
+    for (a, first_i) in selected_source:
+        current = first_i
+        while True:
+            fid = ids[current]
+            if fid in aircraft_by_flight:
+                raise RuntimeError(f"Internal solution audit: flight {fid!r} occurs on multiple aircraft paths")
+            aircraft_by_flight[fid] = tails[a].tail_id
+            if current not in selected_next:
+                break
+            next_i = selected_next[current]
+            if not eligible[tail_class[a], next_i]:
+                raise RuntimeError(f"Internal solution audit: incompatible route for {tails[a].tail_id!r}")
+            current = next_i
+
+    operated = set(ids) - set(cancelled)
+    if set(aircraft_by_flight) != operated:
+        raise RuntimeError(
+            "Internal solution audit: aircraft path decomposition differs from operated flights "
+            f"(missing={sorted(operated-set(aircraft_by_flight))[:10]}, "
+            f"extra={sorted(set(aircraft_by_flight)-operated)[:10]})"
+        )
 
     return JointRecoveryResult(
         cancelled_flights=cancelled,
