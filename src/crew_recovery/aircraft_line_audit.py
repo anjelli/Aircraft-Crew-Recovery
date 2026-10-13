@@ -54,6 +54,10 @@ def audit_aircraft_line_transitions(
     merged = merged.drop(columns=["_merge"])
     merged["mgt_min"] = pd.to_numeric(merged["mgt_min"], errors="coerce")
     merged["mgt_status"] = merged["mgt_status"].astype(str)
+    unresolved_flight_mask = merged["mgt_min"].isna() | merged["mgt_status"].str.upper().str.contains(
+        "_CONFLICT|MISSING|OUT_OF_EFFECTIVE_DATE|UNRESOLVED|AMBIGUOUS", regex=True, na=True
+    )
+    unresolved_flight_ids = sorted(merged.loc[unresolved_flight_mask, "flight_id"].astype(str).unique())
     merged = merged.sort_values(["line_num", "route_STD", "flight_id"]).reset_index(drop=True)
 
     transitions: list[dict[str, Any]] = []
@@ -112,7 +116,7 @@ def audit_aircraft_line_transitions(
     hard_violations = station_discontinuities + time_overlaps + mgt_shortfalls
     if hard_violations:
         status = "INFEASIBLE_TRANSITIONS_FOUND"
-    elif unresolved:
+    elif unresolved_flight_ids or unresolved:
         status = "UNRESOLVED_MGT_RULES"
     else:
         status = "FEASIBLE_ON_CHECKED_RULES"
@@ -127,10 +131,12 @@ def audit_aircraft_line_transitions(
         "time_overlaps": time_overlaps,
         "known_mgt_shortfalls": mgt_shortfalls,
         "transitions_with_unresolved_predecessor_mgt": unresolved,
+        "unresolved_mgt_flight_count": int(len(unresolved_flight_ids)),
+        "unresolved_mgt_flight_ids": unresolved_flight_ids,
         "transitions_feasible_on_checked_rules": int(
             (transition_df["transition_status"] == "FEASIBLE_ON_CHECKED_RULES").sum()
         ) if not transition_df.empty else 0,
-        "full_baseline_feasibility_proven": status == "FEASIBLE_ON_CHECKED_RULES",
+        "full_baseline_feasibility_proven": status == "FEASIBLE_ON_CHECKED_RULES" and not unresolved_flight_ids,
         "interpretation": (
             "The supplied line plan passes the checked station, time, and resolved-MGT tests."
             if status == "FEASIBLE_ON_CHECKED_RULES" else
