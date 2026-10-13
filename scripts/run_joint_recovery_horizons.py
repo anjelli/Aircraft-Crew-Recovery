@@ -21,6 +21,7 @@ HORIZONS = (("1W", 7), ("1M", 31), ("154D", 154))
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--time-limit-seconds", type=float, default=180.0, help="MILP time limit per pass; longer horizons need more than the CI smoke-test limit.")
+    parser.add_argument("--pairing-mode", choices=("existing-only", "expanded"), default="existing-only", help="existing-only uses validated report columns; expanded also runs bounded legal pairing generation and may be expensive on long horizons.")
     parser.add_argument("--output-root", type=Path, default=ROOT / "output" / "joint_recovery")
     parser.add_argument("--horizons", nargs="+", choices=[h[0] for h in HORIZONS], default=["1W", "1M", "154D"])
     args = parser.parse_args()
@@ -36,9 +37,10 @@ def main() -> int:
             "--start-date", "2026-10-25",
             "--days", str(days),
             "--time-limit-seconds", str(args.time_limit_seconds),
-            "--skip-pricing",
             "--output-dir", str(out),
         ]
+        if args.pairing_mode == "existing-only":
+            command.append("--skip-pricing")
         proc = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
         summary_path = out / "summary.json"
         summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {
@@ -47,8 +49,13 @@ def main() -> int:
             "stderr_tail": proc.stderr[-3000:],
         }
         summary["horizon_label"] = label
-        summary["run_mode"] = "joint_operate_cancel_existing_validated_pairings_only"
-        summary["pricing_skipped_for_bounded_runtime"] = True
+        summary["pairing_pool_mode"] = args.pairing_mode
+        summary["run_mode"] = (
+            "joint_operate_cancel_existing_validated_pairings_only"
+            if args.pairing_mode == "existing-only"
+            else "joint_operate_cancel_existing_plus_generated_validated_pairings"
+        )
+        summary["pricing_skipped_for_bounded_runtime"] = args.pairing_mode == "existing-only"
         results.append(summary)
         if proc.returncode:
             exit_code = 1
@@ -56,9 +63,10 @@ def main() -> int:
     aggregate = {
         "scope": "Best-effort joint operate/cancel runs; existing validated pairing columns only.",
         "objective": [
-            "hard constraints in model",
-            "minimize cancellations",
-            "minimize supplied pairing salary plus aircraft start cost",
+            "hard crew/MGT, equipment, aircraft start-state, station-continuity, and route constraints",
+            "maximize operated flights (equivalently minimize cancellations) before any cost trade-off",
+            "then minimize supplied pairing salary plus aircraft start cost",
+            "large-horizon heuristic compares long-column, rare-flight, and cost-per-flight orders; selects maximum coverage, then lower cost",
         ],
         "not_integrated": [
             "flight-copy retiming selection",
@@ -90,16 +98,18 @@ def main() -> int:
                 "crew_coverage_errors": len(r.get("crew_coverage_errors", [])),
                 "operational_acceptance": r.get("operational_acceptance", False),
                 "blockers": r.get("blockers", []),
+                "unoperated_reason_counts_including_unresolved": r.get("unoperated_reason_counts_including_unresolved", {}),
             }
             for r in results
         ],
         "interpretation": (
             "1W uses the joint MILP when its input size is small. Month/full horizons use a "
-            "deterministic feasible heuristic to avoid returning no schedule after a MILP timeout. "
-            "All runs use only independently validated supplied pairing columns in this bounded "
-            "runner; cancelled flights are not proven globally infeasible, and LINE_n resources "
-            "are provisional. Flights with unresolved MGT are reported separately, not counted "
-            "as cancellations. Retiming is not optimized."
+            "coverage-first deterministic multi-start heuristic that compares three pairing orders. "
+            "The default existing-only mode uses validated supplied pairing columns; --pairing-mode "
+            "expanded additionally runs the declared-domain pairing generator and may be expensive "
+            "on long horizons. Reason codes describe the selected restricted plan, not global "
+            "infeasibility. LINE_n resources are provisional. Flights with unresolved MGT are "
+            "reported separately, not counted as cancellations. Retiming is not optimized."
         ),
     }
     (args.output_root / "horizon_summary.json").write_text(json.dumps(aggregate, indent=2) + "\n", encoding="utf-8")
