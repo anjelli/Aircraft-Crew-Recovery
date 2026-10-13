@@ -157,7 +157,7 @@ def solve_joint_operate_cancel(
         return y0 + a * n_f + i
 
     eq_rows = n_f + n_f + n_a * n_f
-    ub_rows = n_a * n_f
+    ub_rows = n_a * n_f + n_a
     a_eq = lil_matrix((eq_rows, n_var), dtype=float)
     b_eq = np.ones(eq_rows, dtype=float)
     a_ub = lil_matrix((ub_rows, n_var), dtype=float)
@@ -188,13 +188,18 @@ def solve_joint_operate_cancel(
             for k in incoming[a, i]:
                 a_eq[row, arc_var[k]] = -1.0
 
-    # At most one successor per assigned flight.
+    # At most one successor per assigned flight, and at most one path/source per tail.
     for a in range(n_a):
         for i in range(n_f):
             row = a * n_f + i
             a_ub[row, yvar(a, i)] = -1.0
             for k in outgoing[a, i]:
                 a_ub[row, arc_var[k]] = 1.0
+        source_row = n_a * n_f + a
+        for key, var in source_index.items():
+            if key[0] == a:
+                a_ub[source_row, var] = 1.0
+        b_ub[source_row] = 1.0
 
     integrality = np.ones(n_var, dtype=int)
     bounds = Bounds(np.zeros(n_var), np.ones(n_var))
