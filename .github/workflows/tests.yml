@@ -36,7 +36,7 @@ jobs:
       - name: Run bounded joint recovery for 1W, 1M, and 154D
         continue-on-error: true
         timeout-minutes: 15
-        run: python scripts/run_joint_recovery_horizons.py --time-limit-seconds 30
+        run: python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
       - name: Run regression tests
         run: python -m pytest -q tests
       - name: Upload recovery audit artifacts
