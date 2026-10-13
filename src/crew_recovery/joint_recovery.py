@@ -401,14 +401,13 @@ def solve_joint_operate_cancel_greedy(
         required = _mgt_minutes(first.get("mgt_min"), str(first["flight_id"]))
         return second["STD"] >= first["STA"] + timedelta(minutes=required)
 
-    def try_insert(route: list[dict[str, object]], flight: dict[str, object], tail: Aircraft) -> int | None:
+    def insertion_position(
+        route: list[dict[str, object]], flight: dict[str, object], tail: Aircraft
+    ) -> tuple[int, float] | None:
         if str(flight["Eqp"]).strip() != tail.equipment.strip():
             return None
-        pos = 0
-        while pos < len(route) and (route[pos]["STD"], str(route[pos]["flight_id"])) < (
-            flight["STD"], str(flight["flight_id"])
-        ):
-            pos += 1
+        key = (flight["STD"], str(flight["flight_id"]))
+        pos = bisect_left(route, key, key=lambda item: (item["STD"], str(item["flight_id"])))
         if pos == 0:
             if str(flight["From"]).strip().upper() != tail.start_station.strip().upper():
                 return None
@@ -418,8 +417,12 @@ def solve_joint_operate_cancel_greedy(
             return None
         if pos < len(route) and not can_follow(flight, route[pos]):
             return None
-        route.insert(pos, flight)
-        return pos
+        added_gap = 0.0
+        if pos > 0:
+            added_gap += (flight["STD"] - route[pos - 1]["STA"]).total_seconds()
+        if pos < len(route):
+            added_gap += (route[pos]["STD"] - flight["STA"]).total_seconds()
+        return pos, added_gap
 
     # Long pairings cover more flights per accepted decision. Salary per covered
     # flight breaks ties; stable IDs make repeated runs reproducible.
@@ -439,33 +442,34 @@ def solve_joint_operate_cancel_greedy(
             continue
         if any(fid in covered for fid in fids):
             continue
-        # Pairings are inserted atomically: a partial route update is rolled back.
-        working_routes = {tid: list(route) for tid, route in routes.items()}
+        # Insert directly with an undo log: this avoids copying the full 31-line
+        # route state for every candidate and keeps full-horizon fallback bounded.
+        undo: list[tuple[str, int, str]] = []
         new_assignments: dict[str, str] = {}
         feasible = True
         sequence = sorted((records[fid] for fid in fids), key=lambda f: (f["STD"], str(f["flight_id"])))
         for flight in sequence:
             options = []
             for tail in tails:
-                trial = list(working_routes[tail.tail_id])
-                inserted = try_insert(trial, flight, tail)
-                if inserted is None:
+                found = insertion_position(routes[tail.tail_id], flight, tail)
+                if found is None:
                     continue
-                added_gap = 0.0
-                if inserted > 0:
-                    added_gap += (flight["STD"] - trial[inserted - 1]["STA"]).total_seconds()
-                if inserted + 1 < len(trial):
-                    added_gap += (trial[inserted + 1]["STD"] - flight["STA"]).total_seconds()
-                options.append((added_gap, len(trial), tail.tail_id, trial))
+                pos, added_gap = found
+                options.append((added_gap, len(routes[tail.tail_id]), tail.tail_id, pos))
             if not options:
                 feasible = False
                 break
-            _gap, _size, tail_id, chosen_route = min(options, key=lambda x: (x[0], x[1], x[2]))
-            working_routes[tail_id] = chosen_route
+            _gap, _size, tail_id, pos = min(options, key=lambda x: (x[0], x[1], x[2]))
+            routes[tail_id].insert(pos, flight)
+            undo.append((tail_id, pos, str(flight["flight_id"])))
             new_assignments[str(flight["flight_id"])] = tail_id
         if not feasible:
+            for tail_id, pos, fid in reversed(undo):
+                if pos < len(routes[tail_id]) and str(routes[tail_id][pos]["flight_id"]) == fid:
+                    routes[tail_id].pop(pos)
+                else:
+                    raise RuntimeError("Greedy pairing rollback invariant failed")
             continue
-        routes = working_routes
         assigned.update(new_assignments)
         covered.update(fids)
         selected.append(pairing.column_id)
