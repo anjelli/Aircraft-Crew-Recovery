@@ -28,10 +28,12 @@ def _schedule(days=155):
     return pd.DataFrame(rows)
 
 
-def test_horizon_runner_selects_exact_7_31_and_155_day_windows():
+def test_horizon_runner_selects_exact_7_31_154_and_155_day_windows():
     schedule = _schedule()
     assert len(_horizon_frame(schedule, "1W")) == 7
     assert len(_horizon_frame(schedule, "1M")) == 31
+    assert len(_horizon_frame(schedule, "154D")) == 154
+    assert _horizon_frame(schedule, "154D")["service_date"].max() == pd.Timestamp("2027-03-27")
     assert len(_horizon_frame(schedule, "155D")) == 155
 
 

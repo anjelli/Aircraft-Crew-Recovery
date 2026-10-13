@@ -24,7 +24,7 @@ for p in (ROOT, SRC):
 from crew_recovery.mgt_effective import filter_effective_mgt_rules
 
 
-HORIZONS = {"1W": 7, "1M": 31, "155D": 155}
+HORIZONS = {"1W": 7, "1M": 31, "154D": 154, "155D": 155}
 
 
 def _canonical_schedule(path: Path) -> pd.DataFrame:
@@ -182,7 +182,7 @@ def export_horizon(schedule: pd.DataFrame, horizon: str, output_dir: Path, excep
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--horizons", nargs="+", choices=sorted(HORIZONS), default=["1W", "1M", "155D"])
+    parser.add_argument("--horizons", nargs="+", choices=sorted(HORIZONS), default=["1W", "1M", "154D"])
     parser.add_argument("--schedule", default=str(ROOT / "originals" / "schedule_kgp.xlsx"))
     parser.add_argument("--mgt", default=str(ROOT / "originals" / "MGT.xlsx"))
     parser.add_argument("--aircraft-lines", default=str(ROOT / "originals" / "low_kgp"))

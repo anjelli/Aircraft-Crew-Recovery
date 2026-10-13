@@ -3,9 +3,13 @@
 ## What this branch adds
 
 - src/crew_recovery/aircraft_rotation.py: binary route-flow assignment for an explicit aircraft inventory. A tail has one initial station/time, flights require compatible equipment, and each tail's selected sequence must connect station-to-station with the preceding flight's minimum ground time.
-- scripts/run_recovery_horizon.py: a deterministic direct-horizon runner for 1 week (7 calendar days), 1 month (31 calendar days), and the full 155-day schedule. It exports an Excel workbook and CSV/JSON files for each horizon.
+- scripts/run_recovery_horizon.py: a deterministic direct-horizon runner for 1 week (7 calendar days), 1 month (31 calendar days), the 154-day operational horizon ending 27 March 2027, and the raw 155-day source horizon. It exports an Excel workbook and CSV/JSON files for each horizon.
 - Tests for multi-leg aircraft state continuity, equipment mapping, horizon sizes, and blocked output semantics.
 - CI runs all three horizon preflight exports and uploads them as artifacts.
+
+## Agreed date scope
+
+The operational working horizon is 25 October 2026 through 27 March 2027 inclusive (154 calendar days). The source schedule also has 28 March entries; those remain out of scope for this run until their MGT rule coverage is confirmed. Use `--horizons 154D` for the agreed scope.
 
 ## Important: this is not yet a recovered schedule
 
@@ -28,10 +32,10 @@ This runner does not use rolling windows. It runs each requested horizon directl
 
     python -m pip install -r requirements.txt
     python setup_workspace.py
-    python scripts/run_recovery_horizon.py --horizons 1W 1M 155D
+    python scripts/run_recovery_horizon.py --horizons 1W 1M 154D
     python -m pytest -q tests
 
-Outputs are written under output/recovery/{1W,1M,155D}/. Each horizon folder contains recovery_<horizon>.xlsx, the flight-level plan, crew-pairing/aircraft-rotation/cancellation/retiming tables, validation results, unresolved exceptions, and recovery_summary.json.
+Outputs are written under output/recovery/{1W,1M,154D}/ (and 155D when explicitly requested). Each horizon folder contains recovery_<horizon>.xlsx, the flight-level plan, crew-pairing/aircraft-rotation/cancellation/retiming tables, validation results, unresolved exceptions, and recovery_summary.json.
 
 ## Acceptance criteria before calling the final schedule recovered
 
