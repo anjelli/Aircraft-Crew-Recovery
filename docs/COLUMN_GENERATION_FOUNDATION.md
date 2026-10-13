@@ -2,7 +2,7 @@
 
 ## Why this is a separate research layer
 
-The active repository contains a pairing generator, an independent pairing validator, disruption experiments, and a coverage MIP archived at `patches/mip.py.orig`. The archived MIP is not a production crew-recovery or aircraft-timeline optimizer. It selects candidate pairings to cover flights and penalizes uncovered flights:
+The active repository contains a pairing generator, an independent pairing validator, disruption experiments, and a coverage MIP archived at `../patches/mip.py.orig`. The archived MIP is not a production crew-recovery or aircraft-timeline optimizer. It selects candidate pairings to cover flights and penalizes uncovered flights:
 
 \[
 \min\;(N+1)\sum_f u_f + \sum_{p\in P}x_p,
@@ -14,7 +14,7 @@ That formulation is a coverage baseline. It does not model individual crew roste
 
 ## What counts as a column?
 
-This repository currently has candidate **pairings**: feasible sequences of flights produced by `pairings_builder.py`. A pairing column covers the flights in that sequence. It is not automatically a complete crew set or a crew roster across the recovery horizon.
+This repository currently has candidate **pairings**: feasible sequences of flights produced by `../pairings_builder.py`. A pairing column covers the flights in that sequence. It is not automatically a complete crew set or a crew roster across the recovery horizon.
 
 For the first research milestone, pairing columns support a column-generation **LP relaxation baseline** for the coverage objective. The restricted master, dual values, reduced-cost arithmetic, and convergence must be validated separately from the pairing enumerator.
 
@@ -26,7 +26,7 @@ Do not claim the second formulation is implemented until its source data and con
 
 ## Current implementation
 
-- `column_generation.py`: restricted-master coverage LP, dual prices, reduced-cost calculation, and finite-pool baseline.
+- `../column_generation.py`: restricted-master coverage LP, dual prices, reduced-cost calculation, and finite-pool baseline.
 - `src/crew_recovery/integrated_column_generation.py`: loop that solves the restricted master, calls pricing, validates returned columns and distinguishes certified from inconclusive stopping.
 - `src/crew_recovery/resource_constrained_pricing.py`: on-demand duty enumeration and pricing for single-duty hub turnarounds and two-duty hub–layover–hub pairings.
 - `src/crew_recovery/independent_validator.py`: independent legality checks for completed candidates.
@@ -66,7 +66,7 @@ Only after Gates A–C pass, benchmark larger horizons. Record pricing runtime, 
 
 Column generation of the LP relaxation alone does **not** guarantee an optimal integer solution. An integer master over only columns generated at the root is a restricted-master incumbent, not a proof of integer optimality. Exact integer optimisation over a large implicit column set requires branch-and-price or another explicitly validated integer strategy.
 
-The current `objective_spec.py` intentionally disables revenue-derived cancellation cost and documents missing decision variables for retiming, crew efficiency, and distinct crew-set count. Keep these terms blocked until the required decisions, confirmed units, route/equipment joins, business priorities, and crew-set definitions are available. Do not reinterpret uncovered-flight slack as cancellation, pairing count as crew-set count, or arbitrary pairing cost as operational cost.
+The current `../objective_spec.py` intentionally disables revenue-derived cancellation cost and documents missing decision variables for retiming, crew efficiency, and distinct crew-set count. Keep these terms blocked until the required decisions, confirmed units, route/equipment joins, business priorities, and crew-set definitions are available. Do not reinterpret uncovered-flight slack as cancellation, pairing count as crew-set count, or arbitrary pairing cost as operational cost.
 
 ## Acceptance gates
 

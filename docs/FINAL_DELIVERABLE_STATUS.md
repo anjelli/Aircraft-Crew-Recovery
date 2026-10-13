@@ -1,45 +1,88 @@
-# Recovery handoff: results and outstanding data
+# Final deliverable status
 
-## Why the earlier horizons did not finish
+**Handoff status: prototype deliverable ready for review; operational acceptance remains blocked.** This is a fixed scope. Do not extend the optimization scope for the handoff unless a reproducible defect is found or authoritative missing inputs are supplied.
 
-The previous runner returned early if any flight in a horizon had missing/conflicting MGT. That meant a small number of unresolved rule lookups could prevent a useful schedule for the remaining flights. The one-month MILP also had thousands of flight, pairing and route-flow variables; at the earlier 30-second limit it sometimes returned no feasible incumbent. Merely increasing the limit is not a reliable solution for the full horizon.
+## Reference execution
 
-A further reproducibility problem was that the joint runner read schedule, pairing report and rule files directly from the repository root, despite the project defining `originals/` as source-of-truth and `input/` as prepared runtime data. The runner now uses the prepared timetable/report and immutable original rule sources.
+- Workflow: [GitHub Actions run 38475474585](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38475474585)
+- Code commit: f568009440afab7f66b7f6fe1ac93f459696eb03
+- Result: success; 108 tests passed.
+- Execution steps: prepared canonical inputs, ran tests, audited AIRFLITE line transitions against MGT, ran all three horizons, and uploaded outputs/audits.
+- Candidate mode: existing-only. Additional pairing generation was skipped for bounded runtime; generated pairing candidates = 0.
+- Output package: [download recovered schedules and audit evidence](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38475474585/artifacts/11854070943).
 
-## New execution behavior
+This pinned workflow run is the source of truth for the results below. A separate 1-week JSON supplied during the discussion reports 582 operated flights and 591 validated candidates; that is not the same result snapshot as this workflow, which reports 570 and 352. The available evidence does not establish why those runs differ. Do not mix metrics from the separate run into this table.
 
-- One week uses the joint MILP on the small instance.
-- One-month and 154-day instances use a deterministic feasible heuristic instead of waiting for a very large MILP to find its first incumbent.
-- Flights with missing/conflicting/out-of-effective-date MGT are excluded from optimization and exported as `UNRESOLVED_MGT`. They are not silently assigned an invented turnaround time or counted as cancellations.
-- The heuristic only accepts a crew pairing when all its flights can be inserted into compatible aircraft-line routes while maintaining starting station/time, equipment equality, station continuity and predecessor MGT.
-- Long-horizon recovery compares the prior single-pass ordering strategies with chronological selection, bounded retry passes, and (where possible) line-preferred and line-locked plans using the provisional AIRFLITE mapping. The summary records operated coverage, the selected plan, and original-line retention. All hard feasibility rules remain in force.
-- Flight decisions include a candidate count, reason code, and explanation for each unoperated flight. Codes distinguish no candidate, overlap with selected pairings, and failure to insert an available pairing into an aircraft route. MILP decisions receive a model-scope non-selection reason; these are diagnostics, not global infeasibility certificates.
-- The horizon runner supports `--pairing-mode expanded` to generate additional candidates within the declared one-/two-/three-duty domain. This is experimental and should be benchmarked on 1W before being attempted on long horizons; the bounded default remains `existing-only`.
-- Every output reports solver mode and explicitly labels heuristic results as non-optimal.
+## Recovery results
 
-## Run and locate results
+| Horizon | Method/status | Active flights | Eligible flights | Operated | Cancelled | Unresolved MGT | Coverage | Validated existing candidates | Selected pairings | Aircraft violations / crew coverage errors |
+|---|---|---:|---:|---:|---:|---:|---|---:|---:|---:|
+| 1W · 25–31 Oct 2026 | Joint MILP; prototype optimum only within the restricted model | 825 | 825 | 570 | 255 | 0 | 69.09% | 352 | 249 | 0 / 0 |
+| 1M · 25 Oct–24 Nov 2026 | Deterministic heuristic; not globally optimal | 3,763 | 3,763 | 2,286 | 1,477 | 0 | 60.75% | 1,629 | 990 | 0 / 0 |
+| 154D · 25 Oct 2026–27 Mar 2027 | Deterministic heuristic; unresolved MGT remains | 19,231 | 19,222 | 12,302 | 6,920 | 9 | 63.97% of all; 64.00% of eligible | 8,433 | 5,327 | 0 / 0 |
 
-```bash
-python -m pip install -r requirements.txt
-python setup_workspace.py
-python -m pytest -q tests
-python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
-```
+Cancelled counts exclude the nine unresolved-MGT flights. They are reported separately. Post-solve checks reported zero aircraft-route violations and zero crew-coverage errors for the selected plans under the current provisional assumptions.
 
-Results: `output/joint_recovery/1W/`, `1M/`, `154D/`, and `output/joint_recovery/horizon_summary.json`. Each horizon writes a workbook, flight decisions, selected pairings, aircraft rotations, validation files and `summary.json`.
+## What the heuristic comparison demonstrates
 
-This environment did not execute the GitHub Actions job, so the new numerical outputs are not yet verified. Use the uploaded `recovered-schedules` artifact from the PR workflow as the execution evidence; do not reuse historical logs as if they were newly computed results.
+All plans in each long-horizon comparison use the same flight set, existing validated pairing candidate pool, and provisional aircraft inventory. Up to eight deterministic plans are evaluated. The selected plan is the one with the most operated flights; the supplied pairing plus aircraft-start cost breaks ties.
 
-## What to ask the data owner for
+| Horizon | Prior single-pass operated | Selected retry plan operated | Gain | Coverage gain |
+|---|---:|---:|---:|---:|
+| 1M | 1,136 | 2,286 | +1,150 | +30.56 percentage points |
+| 154D | 6,544 | 12,302 | +5,758 | +29.96 percentage points |
 
-1. **MGT exceptions:** corrected authoritative MGT rows for each flight in `missing_mgt_rules.csv` / `UNRESOLVED_MGT`, including equipment/subfleet, arrival station, effective start/end dates, frequency and carrier scope. Confirm conflicting matching rows rather than choosing one by row order.
-2. **Aircraft starting state:** actual tail registration (or an explicit approval to use AIRFLITE line IDs as abstract resources), equipment/subfleet, initial station and availability timestamp.
-3. **Equipment compatibility:** approved mapping for `320`, `32N`, `32P`, and `32Q`. Current model assumes exact-code compatibility.
-4. **Objective confirmation:** approved definitions and priorities for cancellations, retiming, crew efficiency and distinct crew-set count. The one-week MILP already minimizes cancellations before supplied pairing salary plus aircraft-start cost. The long-horizon heuristic is now coverage-first but is not globally optimal. Retiming and the complete four-term objective are still not implemented.
+The selected long-horizon strategy is free chronological retry, with two passes reported in each summary. Line-preferred and line-locked plans are diagnostic alternatives, not physical-tail assignments. For 154D, the line-locked chronological plan operated 10,346 flights versus 12,302 for the selected free-reassignment retry plan; the coverage-first rule therefore selected the latter. This comparison supports the conclusion that the old one-pass heuristic left flights unoperated that the retry heuristic could recover. It does not prove the selected plan is globally optimal.
 
-## Interpretation limits
+The 1W MILP result has no comparable heuristic-plan table in its output. Its optimality flags apply only to the supplied validated pairing columns and generated provisional aircraft route arcs.
 
-- `OPERATE` means feasible under the current model and supplied candidate pool, not operational approval.
-- `CANCEL` means not selected in the restricted solution. It is not proof of true operational infeasibility; the pairing report may not contain all legal pairings.
-- `LINE_n` is a provisional line-of-work resource, not a verified tail registration.
-- The long-horizon deterministic heuristic is feasible/non-optimal, not a global MILP optimum.
+## Independent aircraft-line baseline audit
+
+The audit reconciled the supplied AIRFLITE line assignments with the prepared schedule and MGT source:
+
+- 19,231 assigned flights across 31 provisional lines.
+- 19,200 consecutive line transitions checked.
+- 0 station discontinuities, 0 time overlaps, and 0 known MGT shortfalls on checked transitions.
+- 9 flights still have unresolved MGT.
+- Overall audit status: UNRESOLVED_MGT_RULES; full baseline feasibility is **not** proven.
+
+The audit result is included in the downloadable workflow artifact. LINE_n values are proxies inferred from lines of work, not verified aircraft registrations.
+
+## What is in the artifact
+
+The recovered-schedules artifact contains the three horizon folders, each with:
+- summary.json;
+- flight_decisions.csv;
+- selected_pairings.csv;
+- aircraft_rotations.csv;
+- pairing validation status and violation reports;
+- aircraft validation output;
+- a recovery workbook;
+- missing_mgt_rules.csv for the 154-day horizon.
+
+The audit folder includes the aircraft-line transition audit, its summary, data-quality/revenue audit outputs, and duplicate-row audit from workspace preparation. Run-specific outputs are not stored as current results in the Git tree; the artifact is the versioned execution evidence for this snapshot.
+
+## Reproduce locally
+
+Use Python 3.11 from the repository root:
+
+    python -m pip install -r requirements.txt
+    python setup_workspace.py
+    python -m pytest -q tests
+    python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
+
+The default run uses existing-only validated pairing columns and skips candidate generation to keep runtime bounded. Expanded mode is experimental and must be benchmarked separately, beginning with 1W.
+
+## Fixed scope and remaining limitations
+
+The following remain outside the accepted implementation:
+
+1. **Verified aircraft starting states:** no approved aircraft_inventory.csv is supplied. Actual tail registration/equipment, starting station, and availability time are not available. Current LINE_n assignments remain provisional.
+2. **MGT source completion:** nine flights have missing/conflicting/out-of-effective-date MGT. They must remain unresolved until the data owner supplies authoritative rules.
+3. **Approved compatibility:** exact equipment-code matching/demo mappings are not a substitute for an airline-approved equipment/subfleet crosswalk.
+4. **Full objective:** the 1-week model minimizes cancellations, then supplied pairing salary plus aircraft-start cost, within its restricted model. Long-horizon heuristic results are not globally optimal. Full approved operating cost, retiming/flight-copy selection, crew roster/set variables, and globally complete pairing generation are not integrated.
+5. **Owner acceptance:** operational constraints and final objective priorities require owner sign-off.
+
+## Handoff decision
+
+The tested prototype, reproducible entry point, three-horizon output package, reason-coded flight decisions, independent audits, and scope statement form the project handoff. Treat the work as complete at this prototype boundary. Do not describe it as operationally accepted or start another optimization round just to pursue a higher coverage percentage. Reopen the technical scope only for a concrete reproducible defect or when an authoritative input blocker is resolved.

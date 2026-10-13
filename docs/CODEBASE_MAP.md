@@ -1,63 +1,60 @@
-# Codebase Map
+# Codebase map
 
-This document explains the repository's current layout and execution flow. New solver tests and research notes should extend the existing `tests/` and `docs/` locations instead of creating additional top-level files or duplicate implementation modules.
+This document distinguishes the canonical recovery path from older research and compatibility entry points. New solver code belongs under src/crew_recovery/, runnable commands belong under scripts/, tests belong under tests/, and project notes belong under docs/. Do not create duplicate implementations at the repository root.
 
-## Execution flow
+## Canonical recovery execution
 
-1. `scripts/setup_workspace.py` checks source artifacts under `originals/` and invokes `scripts/prep_inputs.py`.
-2. `scripts/prep_inputs.py` prepares runtime inputs under `input/`; duplicate schedule rows are recorded under `output/audit/`.
-3. A script under `scripts/` runs a disruption experiment or audit.
-4. Experiments use `src/crew_recovery/mgt_effective.py`, supplied code under `originals/`, and paths defined in `src/crew_recovery/project_paths.py`.
-5. `column_generation.py` and modules under `src/crew_recovery/` provide the isolated LP research baseline and pricing prototype.
-6. `pytest` under `tests/` covers validation, MGT effective dates, objective readiness, revenue joins, LP mechanics, and independent pricing checks.
+1. setup_workspace.py checks that required files exist under originals/ and invokes scripts/prep_inputs.py.
+2. scripts/prep_inputs.py prepares the schedule and pairing report under input/; exact duplicate schedule rows are recorded under output/audit/.
+3. scripts/run_joint_recovery_horizons.py runs 1W, 1M, and 154D using scripts/run_one_week_joint_recovery.py.
+4. src/crew_recovery/ provides reusable MGT resolution, pairing validation, crew-cost calculation, provisional aircraft route insertion, recovery selection, and independent audits.
+5. The workflow in .github/workflows/tests.yml runs preparation, the regression suite, the aircraft-line baseline audit, the three-horizon runner, and artifact upload.
 
-## Reusable implementation: `src/crew_recovery/`
+## Reusable implementation: src/crew_recovery/
 
-| File | Purpose |
+| Module | Purpose |
 |---|---|
-| `__init__.py` | Marks the reusable package. |
-| `independent_validator.py` | Independently checks pairing legality without importing the supplied builder or MGT implementation. |
-| `mgt_effective.py` | Filters MGT rules by inclusive effective dates and ISO weekday frequency before delegating to supplied MGT logic. |
-| `objective_spec.py` | Defines the four-component objective contract; it is not connected to a production optimisation solver. |
-| `pairing_columns.py` | Converts builder output into stable, independently validated LP columns and preserves multi-day metadata. |
-| `integrated_column_generation.py` | Solves the restricted master, calls a pricing oracle, admits improving columns, and distinguishes certified from inconclusive stopping. |
-| `resource_constrained_pricing.py` | Enumerates and prices the declared single-duty and two-duty pairing domain. Exactness is limited to that domain. |
-| `project_paths.py` | Resolves canonical source files from `originals/` and prepared files from `input/`. |
+| aircraft_inventory.py | Loads and validates explicit aircraft resource inputs when supplied. |
+| aircraft_line_audit.py | Reconciles line assignments, station/time transitions, and MGT completeness. |
+| aircraft_line_inputs.py | Reads the supplied AIRFLITE lines-of-work input. |
+| aircraft_rotation.py | Route/rotation feasibility helpers. |
+| crew_costing.py | Computes the currently supported pairing salary basis. |
+| independent_validator.py | Independently checks candidate pairing legality. |
+| mgt_effective.py | Resolves MGT rules by effective date and day-of-week scope; fails closed on unresolved matches. |
+| objective_spec.py | Defines the requested four-term objective contract but does not imply every term is wired into the recovery solver. |
+| pairing_columns.py | Converts supplied/generated pairing reports to stable candidate columns and validation status. |
+| integrated_column_generation.py | Restricted master/pricing research loop; certification is limited to the declared pricing domain. |
+| resource_constrained_pricing.py | Enumerates/prices pairings in its bounded duty domain. |
+| joint_recovery.py | Joint operate/cancel selection and large-horizon heuristic plan comparison. |
+| project_paths.py | Resolves canonical files from originals/ and prepared inputs from input/. |
 
-## Runnable scripts: `scripts/`
+## Runnable commands: scripts/
 
-| File | Purpose |
+| Script | Purpose |
 |---|---|
-| `setup_workspace.py` | Checks required source artifacts and invokes input preparation. |
-| `prep_inputs.py` | Prepares canonical runtime workbooks and audits exact duplicate schedule rows. |
-| `run_pairing_experiment.py` | Runs week/month disruption experiments, validates existing pairings, generates candidates, and optionally runs column-generation benchmarks/pricing. |
-| `run_pairing_experiment_166_days.py` | Historical full-horizon runner name; the committed schedule currently spans 155 calendar days. It does not perform an integrated crew-assignment MIP stage. |
-| `revenue_audit.py` | Audits schedule-to-revenue joins, equipment matches, unmatched rows, and anomalies; it does not infer an equipment crosswalk. |
-| `objective_layer_readiness.py` | Reports whether a production solver exists and decomposes saved coverage-only objective logs. |
+| setup_workspace.py / prep_inputs.py | Validate source presence and create canonical prepared input files. |
+| run_joint_recovery_horizons.py | Canonical 1W / 1M / 154D run. |
+| run_one_week_joint_recovery.py | Per-horizon operate/cancel selection and exports. |
+| audit_aircraft_line_baseline.py | Reconciles original line assignments with the prepared schedule and MGT. |
+| audit_full_horizon_readiness.py / audit_recovery_gap.py | Additional readiness and gap audits. |
+| run_pairing_experiment.py / run_pairing_experiment_166_days.py | Historical disruption/pairing experiments; not the canonical recovery entry point. |
+| revenue_audit.py | Schedule-to-revenue join quality audit; it does not guess a revenue/equipment mapping. |
+| objective_layer_readiness.py | Inspects saved coverage-only baselines and reports why the complete objective remains blocked. |
 
 ## Tests and automation
 
-| File | Purpose |
-|---|---|
-| `tests/conftest.py` | Makes repository modules importable during test collection. |
-| `tests/test_core.py` | Core validator, experiment helper, disruption reproducibility, and baseline checks. |
-| `tests/test_mgt_effective.py` | MGT effective-date/frequency, strict path resolution, and fail-closed behavior. |
-| `tests/test_objective_layer_readiness.py` | Calendar-day span and coverage-objective decomposition tests. |
-| `tests/test_objective_spec.py` | Objective priority/weight validation and gating for unimplemented components. |
-| `tests/test_revenue_audit.py` | Revenue join, duplicate-key, and anomaly-screen tests. |
-| `tests/test_column_generation.py` | Restricted-master LP, finite-pool pricing, and direct-LP comparisons. |
-| `tests/test_resource_constrained_pricing.py` | Targeted overnight, insufficient-rest, and integrated pricing-loop tests. |
-| `tests/test_resource_constrained_pricing_exhaustive.py` | Independent brute-force reference enumeration and reduced-cost/certification checks on tiny schedules. |
-| `.github/workflows/tests.yml` | Prepares runtime inputs, runs audits, and executes the complete pytest suite on PRs and pushes to `main`. |
+The tests/ folder covers pairing legality, MGT effective dates, aircraft resource/route behavior, objective contracts, recovery selection, independent audit logic, pricing, and historical experiment helpers. The GitHub workflow runs the full suite before producing the recovery artifact.
 
-## Source-of-truth and historical files
+## Canonical files and legacy files
 
-- `originals/` contains supplied source code and input artifacts; do not overwrite these during refactoring.
-- `patches/` contains historical `.orig` snapshots, not active modules.
-- `input/` contains prepared runtime inputs.
-- `output/` contains generated workbooks, audits, and logs.
-- Root-level Python wrappers preserve legacy import/command paths. Keep them until downstream usage is confirmed; do not add duplicate implementations at the root.
+- originals/ is the sole source of truth for provided data/code inputs; identical root-level copies of supplied workbooks/CSVs have been removed.
+- input/ contains prepared runtime copies and can be regenerated.
+- output/ holds historical committed experiments; the current recovery results are produced under the ignored output/joint_recovery/ path and attached to the CI run as an artifact.
+- logs/ retains historical logs for the objective-readiness analysis.
+- patches/ contains archived .orig snapshots only; they are not imported as active solver code.
+- Root-level launchers and import shims are compatibility surfaces. Add features in scripts/ or src/crew_recovery/, not in duplicate root modules.
+- COLUMN_GENERATION_FOUNDATION.md and OBJECTIVE_LAYER_READINESS.md now live under docs/.
 
-## Important boundary
+## Model boundary
 
-The repository remains a crew-pairing generation/validation and disruption-experiment prototype with an LP pricing research layer. It is not yet a complete production crew-recovery solver with full crew-roster, aircraft-tail continuity, operational objective, and integer-optimality guarantees.
+The repository is a tested best-effort crew-pairing and aircraft-line recovery prototype plus an LP-pricing research layer. It is not a production operational crew-recovery optimizer: it does not select retimed flight copies, use verified tail registrations when no approved inventory is provided, implement the complete approved operating-cost/crew-set objective, or prove global optimality for the large-horizon heuristic.
