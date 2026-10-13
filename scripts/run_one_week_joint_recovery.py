@@ -29,8 +29,10 @@ from crew_recovery.independent_validator import (
     pairing_groups,
     prepare_schedule,
     report_flight_id,
+    check_pairing,
     validate_existing,
 )
+from crew_recovery.resource_constrained_pricing import ResourceConstrainedPairingPricer
 from crew_recovery.joint_recovery import solve_joint_operate_cancel
 
 
@@ -48,6 +50,19 @@ def _canonical_schedule(path: Path) -> pd.DataFrame:
     return frame.drop_duplicates(
         subset=["Day", "STD", "STA", "Eqp", "Flt Num", "From", "To"]
     ).reset_index(drop=True)
+
+
+def _derive_layover_stations(report: pd.DataFrame, hub: str = "SIN") -> list[str]:
+    stations = set()
+    for _pid, group, splits in pairing_groups(report):
+        for previous, following in zip(splits, splits[1:]):
+            if not previous or not following:
+                continue
+            station = str(group.iloc[previous[-1]]["To"]).strip().upper()
+            next_origin = str(group.iloc[following[0]]["From"]).strip().upper()
+            if station == next_origin and station and station != hub:
+                stations.add(station)
+    return sorted(stations)
 
 
 def _independent_aircraft_check(decisions: pd.DataFrame, flights: pd.DataFrame, aircraft) -> list[dict]:
@@ -97,7 +112,7 @@ def main() -> int:
         "equipment_in_scope": ["320", "32N", "32P", "32Q"],
         "retiming_supported": False,
         "aircraft_resources_are_provisional": True,
-        "optimality_scope": "Only the supplied independently validated pairing columns and generated aircraft route arcs.",
+        "optimality_scope": "Only independently validated existing/generated pairing columns and generated aircraft route arcs.",
         "blockers": [],
     }
     try:
@@ -140,6 +155,7 @@ def main() -> int:
         valid_ids = set(statuses.loc[statuses["Status"] == "VALID", "Pairing ID"].astype(str))
         candidate_columns = []
         candidate_rows = {}
+        seen_sequences = set()
         for pid, group, splits in pairing_groups(report):
             if pid not in valid_ids:
                 continue
@@ -147,6 +163,8 @@ def main() -> int:
                 continue
             flight_ids = tuple(report_flight_id(row) for _, row in group.iterrows())
             if not set(flight_ids).issubset(set(active["flight_id"])):
+                continue
+            if flight_ids in seen_sequences:
                 continue
             col = PairingColumn(
                 column_id=f"PAIR_{pid}",
@@ -158,6 +176,46 @@ def main() -> int:
             )
             candidate_columns.append(col)
             candidate_rows[col.column_id] = group.copy()
+            seen_sequences.add(flight_ids)
+        existing_valid_count = len(candidate_columns)
+
+        # Generate additional legal pairing columns over the active week to
+        # reduce dependence on the finite report pool. This is an explicit,
+        # bounded domain: hub turns and two-duty hub/layover/hub pairings.
+        def validate_generated(seq, splits, pairing_type):
+            return check_pairing("generated-candidate", list(seq), splits, rules)
+
+        pricer = ResourceConstrainedPairingPricer(
+            active.to_dict("records"),
+            fdp_limits=rules.fdp,
+            duty_start_buffer=rules.dsb,
+            fdp_end_buffer=rules.feb,
+            duty_end_buffer=rules.deb,
+            max_layover_hours=rules.max_layover_h,
+            layover_stations=_derive_layover_stations(report, "SIN"),
+            validator=validate_generated,
+            pairing_cost=1.0,
+            hub="SIN",
+            max_sectors_per_duty=4,
+        )
+        dual_prices = {str(fid): 1000.0 for fid in active["flight_id"]}
+        priced_batch = pricer(
+            dual_prices=dual_prices,
+            active_column_ids=set(),
+            reduced_cost_tolerance=0.0,
+            batch_size=100000,
+        )
+        generated_count = 0
+        duplicate_generated = 0
+        for col in priced_batch.columns:
+            if col.flight_ids in seen_sequences:
+                duplicate_generated += 1
+                continue
+            if not set(col.flight_ids).issubset(set(active["flight_id"])):
+                continue
+            candidate_columns.append(col)
+            seen_sequences.add(col.flight_ids)
+            generated_count += 1
 
         mgt_flights = active.rename(columns={"Eqp": "Eqp"})[
             ["flight_id", "From", "To", "STD", "STA", "Eqp", "mgt_min"]
@@ -229,6 +287,9 @@ def main() -> int:
             summary["status"] = "FEASIBLE_NOT_PROVEN_OPTIMAL"
         summary.update({
             "active_flights": int(len(active)),
+            "existing_valid_pairing_candidates": int(existing_valid_count),
+            "generated_pairing_candidates": int(generated_count),
+            "duplicate_generated_pairings_skipped": int(duplicate_generated),
             "validated_pairing_candidates": int(len(candidate_columns)),
             "invalid_pairing_candidates_in_status_report": int((statuses["Status"] == "INVALID").sum()),
             "pairings_skipped_across_window_boundary": int(skipped),
