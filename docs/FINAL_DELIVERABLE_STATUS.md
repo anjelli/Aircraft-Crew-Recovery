@@ -12,6 +12,9 @@ A further reproducibility problem was that the joint runner read schedule, pairi
 - One-month and 154-day instances use a deterministic feasible heuristic instead of waiting for a very large MILP to find its first incumbent.
 - Flights with missing/conflicting/out-of-effective-date MGT are excluded from optimization and exported as `UNRESOLVED_MGT`. They are not silently assigned an invented turnaround time or counted as cancellations.
 - The heuristic only accepts a crew pairing when all its flights can be inserted into compatible aircraft-line routes while maintaining starting station/time, equipment equality, station continuity and predecessor MGT.
+- Long-horizon recovery compares three deterministic candidate-ordering strategies (long columns first, rare-flight columns first, and cost per covered flight first) and keeps the result with the highest operated-flight count. Cost only breaks coverage ties; hard feasibility rules remain hard constraints.
+- Flight decisions include a candidate count, reason code, and explanation for each unoperated flight. Codes distinguish no candidate, overlap with selected pairings, and failure to insert an available pairing into an aircraft route. MILP decisions receive a model-scope non-selection reason; these are diagnostics, not global infeasibility certificates.
+- The horizon runner supports `--pairing-mode expanded` to generate additional candidates within the declared one-/two-/three-duty domain. This is experimental and should be benchmarked on 1W before being attempted on long horizons; the bounded default remains `existing-only`.
 - Every output reports solver mode and explicitly labels heuristic results as non-optimal.
 
 ## Run and locate results
@@ -32,7 +35,7 @@ This environment did not execute the GitHub Actions job, so the new numerical ou
 1. **MGT exceptions:** corrected authoritative MGT rows for each flight in `missing_mgt_rules.csv` / `UNRESOLVED_MGT`, including equipment/subfleet, arrival station, effective start/end dates, frequency and carrier scope. Confirm conflicting matching rows rather than choosing one by row order.
 2. **Aircraft starting state:** actual tail registration (or an explicit approval to use AIRFLITE line IDs as abstract resources), equipment/subfleet, initial station and availability timestamp.
 3. **Equipment compatibility:** approved mapping for `320`, `32N`, `32P`, and `32Q`. Current model assumes exact-code compatibility.
-4. **Objective confirmation:** approved definitions and priorities for cancellations, retiming, crew efficiency and distinct crew-set count. The current output does not optimize retiming or the complete four-term objective.
+4. **Objective confirmation:** approved definitions and priorities for cancellations, retiming, crew efficiency and distinct crew-set count. The one-week MILP already minimizes cancellations before supplied pairing salary plus aircraft-start cost. The long-horizon heuristic is now coverage-first but is not globally optimal. Retiming and the complete four-term objective are still not implemented.
 
 ## Interpretation limits
 
