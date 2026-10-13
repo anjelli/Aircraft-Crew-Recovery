@@ -1,13 +1,8 @@
-"""Exact resource-constrained pricing over single-duty and two-duty pairings.
+"""Resource-constrained generation/pricing for one-, two-, and three-duty pairings.
 
-This oracle enumerates legal duty paths from schedule/rule data, then scores
-single-duty hub turnarounds and two-duty hub-to-layover-to-hub pairings directly
-against master duals. It does not materialize a full pairing-column universe.
-
-The pricing domain is intentionally explicit: at most two duties per pairing,
-at most max_sectors_per_duty sectors per duty, and layover stations supplied by
-the caller. Exact convergence is only certified over that domain and the
-provided schedule/rule data.
+The declared domain is bounded by max_duties, max_sectors_per_duty, permitted
+layover stations, the max-layover rule, and the supplied validator. Exactness is
+only over that domain and the provided schedule/rule data.
 """
 from __future__ import annotations
 
@@ -57,6 +52,7 @@ class ResourceConstrainedPairingPricer:
         pairing_cost: float = 1.0,
         hub: str = "SIN",
         max_sectors_per_duty: int = 4,
+        max_duties: int = 2,
     ) -> None:
         if not flights:
             raise ValueError("flights must not be empty")
@@ -66,6 +62,8 @@ class ResourceConstrainedPairingPricer:
             raise ValueError("max_layover_hours must be finite and positive")
         if max_sectors_per_duty < 1:
             raise ValueError("max_sectors_per_duty must be >= 1")
+        if max_duties not in (1, 2, 3):
+            raise ValueError("max_duties must be 1, 2, or 3")
         records = [dict(f) for f in flights if bool(f.get("active", True))]
         ids = [str(f.get("flight_id", "")) for f in records]
         if any(not fid for fid in ids) or len(ids) != len(set(ids)):
@@ -86,6 +84,7 @@ class ResourceConstrainedPairingPricer:
         self.pairing_cost = float(pairing_cost)
         self.hub = str(hub).strip().upper()
         self.max_sectors = int(max_sectors_per_duty)
+        self.max_duties = int(max_duties)
         self._duties: tuple[_Duty, ...] | None = None
         self._states_explored = 0
 
@@ -211,7 +210,7 @@ class ResourceConstrainedPairingPricer:
                 col = self._column(duty.flights, splits, "single_day")
                 if col is not None:
                     yield col
-        # Two-duty multi-day pairings: hub -> permitted layover -> hub.
+        # Duty-chain index for pairings that start at the hub and return to it.
         inbound: dict[str, list[_Duty]] = {}
         outbound: dict[str, list[_Duty]] = {}
         for duty in duties:
@@ -219,21 +218,58 @@ class ResourceConstrainedPairingPricer:
                 outbound.setdefault(duty.end_station, []).append(duty)
             if duty.start_station in self.layover_stations and duty.end_station == self.hub:
                 inbound.setdefault(duty.start_station, []).append(duty)
-        for station in sorted(set(outbound) & set(inbound)):
-            for first in outbound[station]:
-                for second in inbound[station]:
-                    if set(first.ids) & set(second.ids):
-                        continue
-                    if second.start_time <= first.end_time:
-                        continue
-                    if second.start_time - first.end_time > self.max_layover:
-                        continue
-                    seq = first.flights + second.flights
-                    split_at = len(first.flights)
-                    splits = [list(range(split_at)), list(range(split_at, len(seq)))]
-                    col = self._column(seq, splits, "multi_day")
-                    if col is not None:
-                        yield col
+
+        # Two-duty multi-day pairings: hub -> permitted layover -> hub.
+        if self.max_duties >= 2:
+            for station in sorted(set(outbound) & set(inbound)):
+                for first in outbound[station]:
+                    for second in inbound[station]:
+                        if set(first.ids) & set(second.ids):
+                            continue
+                        if second.start_time <= first.end_time:
+                            continue
+                        if second.start_time - first.end_time > self.max_layover:
+                            continue
+                        seq = first.flights + second.flights
+                        split_at = len(first.flights)
+                        splits = [list(range(split_at)), list(range(split_at, len(seq)))]
+                        col = self._column(seq, splits, "multi_day")
+                        if col is not None:
+                            yield col
+
+        # Three-duty pairings: hub -> layover A -> layover B -> hub.
+        if self.max_duties >= 3:
+            middle_by_end: dict[str, list[_Duty]] = {}
+            for duty in duties:
+                if duty.start_station in self.layover_stations and duty.end_station in self.layover_stations:
+                    middle_by_end.setdefault(duty.end_station, []).append(duty)
+            for first_station in sorted(outbound):
+                for first in outbound[first_station]:
+                    for middle in middle_by_end.get(first.end_station, ()):
+                        if middle.start_time <= first.end_time:
+                            continue
+                        if middle.start_time - first.end_time > self.max_layover:
+                            continue
+                        if set(first.ids) & set(middle.ids):
+                            continue
+                        for third in inbound.get(middle.end_station, ()):
+                            if third.start_time <= middle.end_time:
+                                continue
+                            if third.start_time - middle.end_time > self.max_layover:
+                                continue
+                            if set(first.ids) & set(third.ids) or set(middle.ids) & set(third.ids):
+                                continue
+                            seq = first.flights + middle.flights + third.flights
+                            split1 = len(first.flights)
+                            split2 = split1 + len(middle.flights)
+                            splits = [
+                                list(range(0, split1)),
+                                list(range(split1, split2)),
+                                list(range(split2, len(seq))),
+                            ]
+                            col = self._column(seq, splits, "three_duty")
+                            if col is not None:
+                                yield col
 
     @property
     def states_explored(self) -> int:
