@@ -180,21 +180,28 @@ def main() -> int:
         candidate_columns = []
         candidate_rows = {}
         seen_sequences = set()
+        active_record_lookup = {
+            str(row["flight_id"]): row for row in active.to_dict("records")
+        }
         for pid, group, splits in pairing_groups(report):
             if pid not in valid_ids:
                 continue
             if not group["Flight Date"].between(start, end).all():
                 continue
             flight_ids = tuple(report_flight_id(row) for _, row in group.iterrows())
-            if not set(flight_ids).issubset(set(active["flight_id"])):
+            if not set(flight_ids).issubset(set(active_record_lookup)):
                 continue
             if flight_ids in seen_sequences:
                 continue
+            # Cost the pairing against canonical, validated schedule records, not
+            # raw report rows. The report may contain blank/malformed local-time
+            # fields and does not carry the canonical flight_id used by the solver.
+            salary_sequence = [active_record_lookup[fid] for fid in flight_ids]
             col = PairingColumn(
                 column_id=f"PAIR_{pid}",
                 flight_ids=flight_ids,
                 cost=crew_salary_cost(
-                    group.to_dict("records"), splits, man_day_cost=man_day_cost,
+                    salary_sequence, splits, man_day_cost=man_day_cost,
                     duty_start_buffer_minutes=rules.dsb, duty_end_buffer_minutes=rules.deb,
                 ),
                 pairing_type="independently_validated_existing_report",
@@ -377,7 +384,11 @@ def main() -> int:
             pd.DataFrame([summary]).to_excel(writer, sheet_name="Summary", index=False)
     except Exception as exc:
         summary["blockers"].append({"code": "RUNNER_EXCEPTION", "detail": f"{type(exc).__name__}: {exc}"})
+        summary["status"] = "BLOCKED_RUNNER_EXCEPTION"
+        summary["operational_acceptance"] = False
         (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        print(json.dumps(summary, indent=2))
+        return 1
     print(json.dumps(summary, indent=2))
     return 0
 
