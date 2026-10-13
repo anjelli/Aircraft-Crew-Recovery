@@ -20,7 +20,7 @@ for p in (ROOT, SRC):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from column_generation import PairingColumn
+from column_generation import PairingColumn, solve_restricted_master
 from crew_recovery.aircraft_line_inputs import load_aircraft_line_inventory
 from crew_recovery.independent_validator import (
     MGTResolver,
@@ -206,14 +206,13 @@ def main() -> int:
         # focused instead of materializing every legal pairing in the week.
         uncovered_before_pricing = sum(degree == 0 for degree in candidate_degree.values())
         single_option_before_pricing = sum(degree == 1 for degree in candidate_degree.values())
-        dual_prices = {
-            fid: (1000.0 if degree == 0 else 0.1 if degree == 1 else 0.0)
-            for fid, degree in candidate_degree.items()
-        }
+        restricted_master = solve_restricted_master(
+            list(active["flight_id"]), candidate_columns, uncovered_penalty=1000.0
+        )
         priced_batch = pricer(
-            dual_prices=dual_prices,
-            active_column_ids=set(),
-            reduced_cost_tolerance=0.0,
+            dual_prices=restricted_master.dual_prices,
+            active_column_ids={col.column_id for col in candidate_columns},
+            reduced_cost_tolerance=1e-7,
             batch_size=20000,
         )
         generated_count = 0
