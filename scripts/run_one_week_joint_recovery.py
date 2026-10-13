@@ -197,6 +197,7 @@ def main() -> int:
             pairing_cost=1.0,
             hub="SIN",
             max_sectors_per_duty=4,
+            max_duties=3,
         )
         candidate_degree = {str(fid): 0 for fid in active["flight_id"]}
         for col in candidate_columns:
