@@ -25,7 +25,7 @@ The single recovery command runs:
 For an experimental expanded candidate pool, run one horizon at a time first:
 
 ```bash
-python scripts/run_joint_recovery_horizons.py --horizons 1W --pairing-mode expanded --time-limit-seconds 180
+python scripts/run_joint_recovery_horizons.py --horizons 1W --pairing-mode expanded --output-root output/joint_recovery_expanded --time-limit-seconds 180
 ```
 
 `existing-only` is the bounded default. `expanded` additionally runs the declared-domain legal pairing generator and can be expensive; it does not claim to generate every pairing that might be operationally legal. Begin with 1W before using it on longer horizons.
