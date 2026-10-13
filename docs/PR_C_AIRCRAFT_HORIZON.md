@@ -35,7 +35,7 @@ This runner does not use rolling windows. It runs each requested horizon directl
     python scripts/run_recovery_horizon.py --horizons 1W 1M 154D
     python -m pytest -q tests
 
-Outputs are written under output/recovery/{1W,1M,154D}/ (and 155D when explicitly requested).. Each horizon folder contains recovery_<horizon>.xlsx, the flight-level plan, crew-pairing/aircraft-rotation/cancellation/retiming tables, validation results, unresolved exceptions, and recovery_summary.json.
+Outputs are written under output/recovery/{1W,1M,154D}/ (and 155D when explicitly requested). Each horizon folder contains recovery_<horizon>.xlsx, the flight-level plan, crew-pairing/aircraft-rotation/cancellation/retiming tables, validation results, unresolved exceptions, and recovery_summary.json.
 
 ## Acceptance criteria before calling the final schedule recovered
 
