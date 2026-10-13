@@ -1,9 +1,10 @@
 """Run bounded joint crew/aircraft operate-cancel prototypes for 1W, 1M and 154D.
 
-This produces decision-level best-effort schedules using independently validated
-existing pairing-report columns only. It deliberately skips broad candidate
-pricing for long horizons. Results are candidate-pool limited and provisional
-when aircraft LINE_n resources are used; they are not operational acceptance.
+This produces decision-level best-effort schedules. The default uses
+independently validated existing pairing-report columns; optional expanded mode
+also runs the declared-domain pairing generator. Results are candidate-pool
+limited and provisional when aircraft LINE_n resources are used; they are not
+operational acceptance.
 """
 from __future__ import annotations
 
