@@ -102,6 +102,10 @@ def main() -> int:
     parser.add_argument("--start-date", default="2026-10-25")
     parser.add_argument("--days", type=int, default=7)
     parser.add_argument("--time-limit-seconds", type=float, default=120.0)
+    parser.add_argument(
+        "--skip-pricing", action="store_true",
+        help="Use only independently valid existing pairing-report columns; useful for bounded horizon-scale smoke runs.",
+    )
     parser.add_argument("--output-dir", type=Path, default=ROOT / "output" / "one_week_joint_recovery")
     args = parser.parse_args()
     if args.days < 1:
@@ -180,21 +184,28 @@ def main() -> int:
         candidate_columns = []
         candidate_rows = {}
         seen_sequences = set()
+        active_record_lookup = {
+            str(row["flight_id"]): row for row in active.to_dict("records")
+        }
         for pid, group, splits in pairing_groups(report):
             if pid not in valid_ids:
                 continue
             if not group["Flight Date"].between(start, end).all():
                 continue
             flight_ids = tuple(report_flight_id(row) for _, row in group.iterrows())
-            if not set(flight_ids).issubset(set(active["flight_id"])):
+            if not set(flight_ids).issubset(set(active_record_lookup)):
                 continue
             if flight_ids in seen_sequences:
                 continue
+            # Cost the pairing against canonical, validated schedule records, not
+            # raw report rows. The report may contain blank/malformed local-time
+            # fields and does not carry the canonical flight_id used by the solver.
+            salary_sequence = [active_record_lookup[fid] for fid in flight_ids]
             col = PairingColumn(
                 column_id=f"PAIR_{pid}",
                 flight_ids=flight_ids,
                 cost=crew_salary_cost(
-                    group.to_dict("records"), splits, man_day_cost=man_day_cost,
+                    salary_sequence, splits, man_day_cost=man_day_cost,
                     duty_start_buffer_minutes=rules.dsb, duty_end_buffer_minutes=rules.deb,
                 ),
                 pairing_type="independently_validated_existing_report",
@@ -219,43 +230,48 @@ def main() -> int:
         def validate_generated(seq, splits, pairing_type):
             return check_pairing("generated-candidate", list(seq), splits, rules)
 
-        pricer = ResourceConstrainedPairingPricer(
-            active.to_dict("records"),
-            fdp_limits=rules.fdp,
-            duty_start_buffer=rules.dsb,
-            fdp_end_buffer=rules.feb,
-            duty_end_buffer=rules.deb,
-            max_layover_hours=rules.max_layover_h,
-            layover_stations=_derive_layover_stations(report, "SIN"),
-            validator=validate_generated,
-            pairing_cost=1.0,
-            pairing_cost_fn=generated_pairing_cost_callback(
-                man_day_cost=man_day_cost,
-                duty_start_buffer_minutes=rules.dsb,
-                duty_end_buffer_minutes=rules.deb,
-            ),
-            candidate_score_fn=pairing_efficiency_score,
-            hub="SIN",
-            max_sectors_per_duty=4,
-            max_duties=3,
-            focus_flight_ids=uncovered_flights,
-        )
         # Record the pre-generation coverage gaps so the candidate expansion is auditable.
         uncovered_before_pricing = sum(degree == 0 for degree in candidate_degree.values())
         single_option_before_pricing = sum(degree == 1 for degree in candidate_degree.values())
-        generated_pool = pricer.generate_candidates()
         generated_count = 0
         duplicate_generated = 0
-        active_ids = set(active["flight_id"])
-        for col in generated_pool:
-            if col.flight_ids in seen_sequences:
-                duplicate_generated += 1
-                continue
-            if not set(col.flight_ids).issubset(active_ids):
-                continue
-            candidate_columns.append(col)
-            seen_sequences.add(col.flight_ids)
-            generated_count += 1
+        generated_domain_size = 0
+        pricing_states_explored = 0
+        if not args.skip_pricing:
+            pricer = ResourceConstrainedPairingPricer(
+                active.to_dict("records"),
+                fdp_limits=rules.fdp,
+                duty_start_buffer=rules.dsb,
+                fdp_end_buffer=rules.feb,
+                duty_end_buffer=rules.deb,
+                max_layover_hours=rules.max_layover_h,
+                layover_stations=_derive_layover_stations(report, "SIN"),
+                validator=validate_generated,
+                pairing_cost=1.0,
+                pairing_cost_fn=generated_pairing_cost_callback(
+                    man_day_cost=man_day_cost,
+                    duty_start_buffer_minutes=rules.dsb,
+                    duty_end_buffer_minutes=rules.deb,
+                ),
+                candidate_score_fn=pairing_efficiency_score,
+                hub="SIN",
+                max_sectors_per_duty=4,
+                max_duties=3,
+                focus_flight_ids=uncovered_flights,
+            )
+            generated_pool = pricer.generate_candidates()
+            generated_domain_size = len(generated_pool)
+            pricing_states_explored = pricer.states_explored
+            active_ids = set(active["flight_id"])
+            for col in generated_pool:
+                if col.flight_ids in seen_sequences:
+                    duplicate_generated += 1
+                    continue
+                if not set(col.flight_ids).issubset(active_ids):
+                    continue
+                candidate_columns.append(col)
+                seen_sequences.add(col.flight_ids)
+                generated_count += 1
 
         mgt_flights = active.rename(columns={"Eqp": "Eqp"})[
             ["flight_id", "From", "To", "STD", "STA", "Eqp", "mgt_min"]
@@ -334,10 +350,17 @@ def main() -> int:
             "flights_with_one_existing_pairing_candidate": int(single_option_before_pricing),
             "three_duty_focus_flights": int(len(uncovered_flights)),
             "generated_pairing_candidates": int(generated_count),
-            "generated_legal_pairing_domain_size": int(len(generated_pool)),
-            "candidate_scoring": "salary-cost-per-sector heuristic; all generated legal columns retained",
-            "pricing_explored_states": int(pricer.states_explored),
-            "pricing_domain_status": "all-legal-one/two-duty-domain-plus-three-duty-options-targeted-to-uncovered-flights",
+            "candidate_scoring": (
+                "not run; existing validated pairing columns only" if args.skip_pricing
+                else "salary-cost-per-sector heuristic; all generated legal columns retained"
+            ),
+            "pricing_explored_states": int(pricing_states_explored),
+            "generated_legal_pairing_domain_size": int(generated_domain_size),
+            "pricing_skipped": bool(args.skip_pricing),
+            "pricing_domain_status": (
+                "existing_validated_pairing_report_columns_only" if args.skip_pricing
+                else "all-legal-one/two-duty-domain-plus-three-duty-options-targeted-to-uncovered-flights"
+            ),
             "duplicate_generated_pairings_skipped": int(duplicate_generated),
             "validated_pairing_candidates": int(len(candidate_columns)),
             "invalid_pairing_candidates_in_status_report": int((statuses["Status"] == "INVALID").sum()),
@@ -377,7 +400,11 @@ def main() -> int:
             pd.DataFrame([summary]).to_excel(writer, sheet_name="Summary", index=False)
     except Exception as exc:
         summary["blockers"].append({"code": "RUNNER_EXCEPTION", "detail": f"{type(exc).__name__}: {exc}"})
+        summary["status"] = "BLOCKED_RUNNER_EXCEPTION"
+        summary["operational_acceptance"] = False
         (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        print(json.dumps(summary, indent=2))
+        return 1
     print(json.dumps(summary, indent=2))
     return 0
 

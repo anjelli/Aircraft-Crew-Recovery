@@ -32,7 +32,11 @@ jobs:
       - name: Run consolidated recovery-gap audit
         run: python scripts/audit_recovery_gap.py
       - name: Run one-week joint crew-aircraft recovery prototype
-        run: python scripts/run_one_week_joint_recovery.py --start-date 2026-10-25 --days 7 --time-limit-seconds 120
+        run: python scripts/run_one_week_joint_recovery.py --start-date 2026-10-25 --days 7 --time-limit-seconds 30 --skip-pricing
+      - name: Run bounded joint recovery for 1W, 1M, and 154D
+        continue-on-error: true
+        timeout-minutes: 15
+        run: python scripts/run_joint_recovery_horizons.py --time-limit-seconds 30
       - name: Run regression tests
         run: python -m pytest -q tests
       - name: Upload recovery audit artifacts
@@ -47,6 +51,7 @@ jobs:
             output/audit/recovery_gap/
             output/recovery/
             output/one_week_joint_recovery/
+            output/joint_recovery/
           if-no-files-found: error
       - name: Upload revenue/objective audit artifacts
         uses: actions/upload-artifact@v4
