@@ -42,7 +42,7 @@ def _brute_force_one_aircraft(flights, pairings, aircraft):
             if route:
                 first = route[0]
                 if (
-                    first["Eqp"] != aircraft.equipment
+                    any(f["Eqp"] != aircraft.equipment for f in route)
                     or first["From"] != aircraft.start_station
                     or first["STD"] < aircraft.available_at
                 ):
