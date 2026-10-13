@@ -53,6 +53,7 @@ class ResourceConstrainedPairingPricer:
         hub: str = "SIN",
         max_sectors_per_duty: int = 4,
         max_duties: int = 2,
+        focus_flight_ids: Sequence[str] | None = None,
     ) -> None:
         if not flights:
             raise ValueError("flights must not be empty")
@@ -85,6 +86,7 @@ class ResourceConstrainedPairingPricer:
         self.hub = str(hub).strip().upper()
         self.max_sectors = int(max_sectors_per_duty)
         self.max_duties = int(max_duties)
+        self.focus_flight_ids = None if focus_flight_ids is None else frozenset(str(x) for x in focus_flight_ids)
         self._duties: tuple[_Duty, ...] | None = None
         self._states_explored = 0
 
@@ -260,6 +262,8 @@ class ResourceConstrainedPairingPricer:
                             if set(first.ids) & set(third.ids) or set(middle.ids) & set(third.ids):
                                 continue
                             seq = first.flights + middle.flights + third.flights
+                            if self.focus_flight_ids is not None and not (set(first.ids) | set(middle.ids) | set(third.ids)) & self.focus_flight_ids:
+                                continue
                             split1 = len(first.flights)
                             split2 = split1 + len(middle.flights)
                             splits = [
