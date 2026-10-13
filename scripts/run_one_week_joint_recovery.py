@@ -20,7 +20,7 @@ for p in (ROOT, SRC):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from column_generation import PairingColumn, solve_restricted_master
+from column_generation import PairingColumn
 from crew_recovery.aircraft_line_inputs import load_aircraft_line_inventory
 from crew_recovery.independent_validator import (
     MGTResolver,
@@ -206,22 +206,15 @@ def main() -> int:
         # focused instead of materializing every legal pairing in the week.
         uncovered_before_pricing = sum(degree == 0 for degree in candidate_degree.values())
         single_option_before_pricing = sum(degree == 1 for degree in candidate_degree.values())
-        restricted_master = solve_restricted_master(
-            list(active["flight_id"]), candidate_columns, uncovered_penalty=1000.0
-        )
-        priced_batch = pricer(
-            dual_prices=restricted_master.dual_prices,
-            active_column_ids={col.column_id for col in candidate_columns},
-            reduced_cost_tolerance=1e-7,
-            batch_size=20000,
-        )
+        generated_pool = pricer.generate_candidates()
         generated_count = 0
         duplicate_generated = 0
-        for col in priced_batch.columns:
+        active_ids = set(active["flight_id"])
+        for col in generated_pool:
             if col.flight_ids in seen_sequences:
                 duplicate_generated += 1
                 continue
-            if not set(col.flight_ids).issubset(set(active["flight_id"])):
+            if not set(col.flight_ids).issubset(active_ids):
                 continue
             candidate_columns.append(col)
             seen_sequences.add(col.flight_ids)
@@ -301,9 +294,9 @@ def main() -> int:
             "flights_without_existing_pairing_candidate": int(uncovered_before_pricing),
             "flights_with_one_existing_pairing_candidate": int(single_option_before_pricing),
             "generated_pairing_candidates": int(generated_count),
-            "pricing_explored_states": int(priced_batch.explored_states),
-            "pricing_domain_status": str(priced_batch.status),
-            "pricing_best_reduced_cost": priced_batch.best_reduced_cost,
+            "generated_legal_pairing_domain_size": int(len(generated_pool)),
+            "pricing_explored_states": int(pricer._states_explored),
+            "pricing_domain_status": "full-legal-candidate-enumeration-two-duty-pairing-domain",
             "duplicate_generated_pairings_skipped": int(duplicate_generated),
             "validated_pairing_candidates": int(len(candidate_columns)),
             "invalid_pairing_candidates_in_status_report": int((statuses["Status"] == "INVALID").sum()),
