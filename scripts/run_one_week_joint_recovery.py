@@ -117,6 +117,7 @@ def main() -> int:
         "equipment_in_scope": ["320", "32N", "32P", "32Q"],
         "retiming_supported": False,
         "objective_policy": ["minimize_cancellations", "minimize_midnight_aware_crew_salary_plus_aircraft_start_cost"],
+        "objective_contract": objective_contract(retiming_integrated=False, crew_roster_integrated=False),
         "objective_cost_basis": "Crew salary uses cost_parameters.csv man_day_cost multiplied by each duty calendar day touched, including the second day when duty crosses midnight; other allowances and retiming are not yet integrated.",
         "candidate_ranking": "Salary cost per covered sector, then duty count; ordering only, every legal generated column is retained. This is a heuristic baseline, not trained ML.",
         "aircraft_resources_are_provisional": True,
