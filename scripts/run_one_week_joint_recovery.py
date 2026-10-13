@@ -36,6 +36,7 @@ from crew_recovery.independent_validator import (
 from crew_recovery.resource_constrained_pricing import ResourceConstrainedPairingPricer
 from crew_recovery.crew_costing import crew_salary_cost, generated_pairing_cost_callback
 from crew_recovery.pairing_scoring import pairing_efficiency_score
+from crew_recovery.operational_objective import objective_contract
 from crew_recovery.objective_spec import load_cost_parameters
 from crew_recovery.joint_recovery import solve_joint_operate_cancel
 
@@ -323,6 +324,8 @@ def main() -> int:
             summary["status"] = "PROTOTYPE_OPTIMAL_OVER_SUPPLIED_COLUMNS"
         else:
             summary["status"] = "FEASIBLE_NOT_PROVEN_OPTIMAL"
+        if not summary["registered_tail_inventory_loaded"] and summary["status"] == "PROTOTYPE_OPTIMAL_OVER_SUPPLIED_COLUMNS":
+            summary["status"] = "PROTOTYPE_OPTIMAL_WITH_PROVISIONAL_TAILS"
         summary.update({
             "active_flights": int(len(active)),
             "existing_valid_pairing_candidates": int(existing_valid_count),
