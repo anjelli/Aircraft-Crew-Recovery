@@ -143,3 +143,30 @@ def test_full_candidate_enumeration_is_independent_of_reduced_cost_filter():
 
     assert any(c.flight_ids == ("OUT", "BACK") and c.is_multi_day for c in full_pool)
     assert zero_dual_batch.columns == ()
+
+
+def test_three_duty_pairing_is_generated_only_when_enabled():
+    flights = [
+        flight("OUT", "SIN", "KUL", "2026-10-25T09:00"),
+        flight("MIDDLE", "KUL", "BKK", "2026-10-26T08:00"),
+        flight("BACK", "BKK", "SIN", "2026-10-27T08:00"),
+    ]
+    two_duty = make_pricer(flights)
+    three_duty = ResourceConstrainedPairingPricer(
+        flights,
+        fdp_limits=two_duty.fdp_limits,
+        duty_start_buffer=two_duty.dsb,
+        fdp_end_buffer=two_duty.feb,
+        duty_end_buffer=two_duty.deb,
+        max_layover_hours=72.0,
+        layover_stations=["KUL", "BKK"],
+        validator=two_duty.validator,
+        pairing_cost=1.0,
+        hub="SIN",
+        max_sectors_per_duty=4,
+        max_duties=3,
+    )
+
+    assert not any(c.num_duties == 3 for c in two_duty.generate_candidates())
+    three_duty_columns = [c for c in three_duty.generate_candidates() if c.num_duties == 3]
+    assert any(c.flight_ids == ("OUT", "MIDDLE", "BACK") for c in three_duty_columns)
