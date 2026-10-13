@@ -38,7 +38,7 @@ from crew_recovery.crew_costing import crew_salary_cost, generated_pairing_cost_
 from crew_recovery.pairing_scoring import pairing_efficiency_score
 from crew_recovery.operational_objective import objective_contract
 from crew_recovery.objective_spec import load_cost_parameters
-from crew_recovery.joint_recovery import solve_joint_operate_cancel
+from crew_recovery.joint_recovery import solve_joint_operate_cancel, solve_joint_operate_cancel_greedy
 
 
 def _canonical_schedule(path: Path) -> pd.DataFrame:
@@ -139,17 +139,27 @@ def main() -> int:
             raise ValueError("No active flights found for requested one-week window")
         if active["flight_id"].duplicated().any():
             raise ValueError("Active schedule contains duplicate flight IDs")
-        bad_mgt_mask = active["mgt_min"].isna() | active["mgt_status"].astype(str).str.contains("_CONFLICT", regex=False)
-        missing_mgt = active.loc[bad_mgt_mask, ["flight_id", "Flt Num", "From", "To", "Eqp", "STA_local", "mgt_status"]]
+        all_active = active.copy()
+        bad_mgt_mask = active["mgt_min"].isna() | active["mgt_status"].astype(str).str.contains("_CONFLICT|MISSING|OUT_OF_EFFECTIVE_DATE", regex=True)
+        missing_mgt = active.loc[bad_mgt_mask, ["flight_id", "Flt Num", "From", "To", "Eqp", "STA_local", "mgt_status"]].copy()
+        unresolved_mgt_ids = set(missing_mgt["flight_id"].astype(str))
         if not missing_mgt.empty:
             missing_mgt.to_csv(out / "missing_mgt_rules.csv", index=False)
             summary["blockers"].append({
                 "code": "MGT_RULE_MISSING",
                 "count": int(len(missing_mgt)),
-                "detail": "At least one active flight has missing or conflicting arrival-station/equipment MGT. The solver was not run with fabricated or ambiguous turnaround values.",
+                "detail": "Flights with missing/conflicting/out-of-effective-date MGT are excluded from optimization and explicitly exported as UNRESOLVED_MGT. No turnaround values are fabricated.",
             })
-            summary["active_flights"] = int(len(active))
+        # Optimize only flights with a resolvable, unambiguous MGT. Keep unresolved
+        # flights in the final flight-level file rather than blocking all other dates.
+        active = active.loc[~bad_mgt_mask].copy().reset_index(drop=True)
+        if active.empty:
+            summary["status"] = "BLOCKED_NO_MGT_RESOLVED_FLIGHTS"
+            summary["active_flights"] = int(len(all_active))
+            summary["optimization_eligible_flights"] = 0
+            summary["unresolved_mgt_flights"] = int(len(missing_mgt))
             summary["missing_mgt_count"] = int(len(missing_mgt))
+            missing_mgt.to_csv(out / "flight_decisions.csv", index=False)
             (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
             return 0
 
@@ -276,10 +286,24 @@ def main() -> int:
         mgt_flights = active.rename(columns={"Eqp": "Eqp"})[
             ["flight_id", "From", "To", "STD", "STA", "Eqp", "mgt_min"]
         ].to_dict("records")
-        result = solve_joint_operate_cancel(
-            mgt_flights, candidate_columns, aircraft,
-            time_limit_seconds=args.time_limit_seconds,
-        )
+        # The full MILP is appropriate for the small baseline. At month/full scale,
+        # the route-flow binary model can spend its time limit before finding an
+        # incumbent; use the explicit deterministic feasibility heuristic instead.
+        solver_mode = "joint_milp"
+        if len(active) > 1500:
+            result = solve_joint_operate_cancel_greedy(mgt_flights, candidate_columns, aircraft)
+            solver_mode = "deterministic_greedy_large_horizon"
+        else:
+            try:
+                result = solve_joint_operate_cancel(
+                    mgt_flights, candidate_columns, aircraft,
+                    time_limit_seconds=args.time_limit_seconds,
+                )
+            except RuntimeError as solve_error:
+                if "no feasible incumbent" not in str(solve_error).lower():
+                    raise
+                result = solve_joint_operate_cancel_greedy(mgt_flights, candidate_columns, aircraft)
+                solver_mode = "deterministic_greedy_no_incumbent_fallback"
         selected_pairings = set(result.selected_pairing_ids)
         selected_map = {}
         for pid in selected_pairings:
@@ -310,6 +334,25 @@ def main() -> int:
                 "retime_minutes": 0,
             })
         decisions = pd.DataFrame(decision_rows)
+        if not missing_mgt.empty:
+            unresolved_rows = []
+            all_records = all_active.set_index("flight_id").to_dict("index")
+            for fid in sorted(unresolved_mgt_ids):
+                row = all_records[fid]
+                unresolved_rows.append({
+                    "flight_id": fid,
+                    "service_date": pd.Timestamp(row["Day"]).date().isoformat(),
+                    "flight_number": int(row["Flt Num"]),
+                    "From": row["From"], "To": row["To"], "Eqp": row["Eqp"],
+                    "original_STD_local": str(row["STD_local"]),
+                    "original_STA_local": str(row["STA_local"]),
+                    "recovered_STD_local": None, "recovered_STA_local": None,
+                    "recovery_action": "UNRESOLVED_MGT",
+                    "cancellation_reason": "No unambiguous applicable MGT rule; requires data-owner resolution.",
+                    "assigned_pairing_id": None, "assigned_aircraft_tail": None,
+                    "retime_minutes": None,
+                })
+            decisions = pd.concat([decisions, pd.DataFrame(unresolved_rows)], ignore_index=True)
         selected_pairing_rows = []
         for pid in sorted(selected_pairings):
             col = next(c for c in candidate_columns if c.column_id == pid)
@@ -343,8 +386,19 @@ def main() -> int:
             summary["status"] = "FEASIBLE_NOT_PROVEN_OPTIMAL"
         if not summary["registered_tail_inventory_loaded"] and summary["status"] == "PROTOTYPE_OPTIMAL_OVER_SUPPLIED_COLUMNS":
             summary["status"] = "PROTOTYPE_OPTIMAL_WITH_PROVISIONAL_TAILS"
+        if solver_mode.startswith("deterministic_greedy"):
+            summary["status"] = "HEURISTIC_FEASIBLE_NOT_OPTIMAL"
+        if not missing_mgt.empty:
+            summary["status_before_unresolved_mgt"] = summary["status"]
+            summary["status"] = "PARTIAL_RECOVERY_UNRESOLVED_MGT"
         summary.update({
-            "active_flights": int(len(active)),
+            "solver_mode": solver_mode,
+            "active_flights": int(len(all_active)),
+            "optimization_eligible_flights": int(len(active)),
+            "unresolved_mgt_flights": int(len(missing_mgt)),
+            "missing_mgt_count": int(len(missing_mgt)),
+            "operated_coverage_pct_of_all_flights": round(100.0 * int((decisions["recovery_action"] == "OPERATE").sum()) / max(1, len(all_active)), 2),
+            "operated_coverage_pct_of_eligible_flights": round(100.0 * int((decisions["recovery_action"] == "OPERATE").sum()) / max(1, len(active)), 2),
             "existing_valid_pairing_candidates": int(existing_valid_count),
             "flights_without_existing_pairing_candidate": int(uncovered_before_pricing),
             "flights_with_one_existing_pairing_candidate": int(single_option_before_pricing),
@@ -391,7 +445,7 @@ def main() -> int:
         rotations.to_csv(out / "aircraft_rotations.csv", index=False)
         pd.DataFrame(aircraft_violations).to_csv(out / "aircraft_validation_violations.csv", index=False)
         (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        with pd.ExcelWriter(out / "one_week_joint_recovery.xlsx", engine="openpyxl") as writer:
+        with pd.ExcelWriter(out / f"recovery_{args.days}d.xlsx", engine="openpyxl") as writer:
             decisions.to_excel(writer, sheet_name="Flight Decisions", index=False)
             pairing_output.to_excel(writer, sheet_name="Selected Pairings", index=False)
             rotations.to_excel(writer, sheet_name="Aircraft Rotations", index=False)
