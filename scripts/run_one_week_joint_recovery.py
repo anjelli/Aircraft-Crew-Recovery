@@ -39,6 +39,7 @@ from crew_recovery.pairing_scoring import pairing_efficiency_score
 from crew_recovery.operational_objective import objective_contract
 from crew_recovery.objective_spec import load_cost_parameters
 from crew_recovery.joint_recovery import solve_joint_operate_cancel, solve_joint_operate_cancel_greedy
+from crew_recovery.project_paths import input_file, original_file
 
 
 def _canonical_schedule(path: Path) -> pd.DataFrame:
@@ -131,8 +132,8 @@ def main() -> int:
         "blockers": [],
     }
     try:
-        raw_schedule = _canonical_schedule(ROOT / "schedule_kgp.xlsx")
-        resolver = MGTResolver(ROOT / "MGT.xlsx")
+        raw_schedule = _canonical_schedule(input_file("schedule.xlsx"))
+        resolver = MGTResolver(original_file("MGT.xlsx"))
         prepared = prepare_schedule(raw_schedule, resolver)
         active = prepared.loc[prepared["Day"].dt.normalize().between(start, end)].copy().reset_index(drop=True)
         if active.empty:
@@ -164,7 +165,7 @@ def main() -> int:
             return 0
 
         provisional_aircraft, line_assignments = load_aircraft_line_inventory(
-            ROOT / "low_kgp", ROOT / "schedule_kgp.xlsx",
+            original_file("low_kgp"), input_file("schedule.xlsx"),
             start_date="2026-10-25", end_date="2027-03-27",
         )
         line_assignments.to_csv(out / "provisional_line_inventory.csv", index=False)
@@ -180,10 +181,10 @@ def main() -> int:
                 "detail": "No aircraft_inventory.csv found. LINE_n resources are only provisional line-of-work proxies; the solve is a research baseline, not an operational tail assignment.",
             })
 
-        report = pd.read_excel(ROOT / "pairing_report.xlsx")
-        costs = load_cost_parameters(ROOT / "cost_parameters.csv")
+        report = pd.read_excel(input_file("pairing_report.xlsx"))
+        costs = load_cost_parameters(original_file("cost_parameters.csv"))
         man_day_cost = costs["man_day_cost"]
-        rules = Rules(fdp=load_fdp(ROOT / "fdp_rules.csv"), dsb=60, feb=0, deb=30, max_layover_h=72.0)
+        rules = Rules(fdp=load_fdp(original_file("fdp_rules.csv")), dsb=60, feb=0, deb=30, max_layover_h=72.0)
         statuses, violations, unmatched, skipped = validate_existing(
             report, prepared, rules, start=start, end=end
         )
