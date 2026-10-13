@@ -462,6 +462,7 @@ def main() -> int:
             "aircraft_violations": aircraft_violations,
             "crew_coverage_errors": crew_coverage_errors,
             "solver_message": result.solver_message,
+            "heuristic_plan_comparison": result.heuristic_diagnostics,
             "secondary_objective": result.secondary_objective,
             "crew_salary_cost_basis": "man_day_cost per duty calendar day; crossing midnight counts both calendar dates",
             "minimum_cancellation_count_proven": result.minimum_cancellation_count_proven,
