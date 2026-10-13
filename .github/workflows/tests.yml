@@ -27,8 +27,8 @@ jobs:
         run: python scripts/audit_full_horizon_readiness.py --output output/audit/full_horizon_readiness.json
       - name: Run one-week resource-constrained pricing audit
         run: python run_pairing_experiment.py --horizons 1W --resource-constrained-pricing
-      - name: Export 1W, 1M, and 155D recovery readiness packages
-        run: python scripts/run_recovery_horizon.py --horizons 1W 1M 155D
+      - name: Export 1W, 1M, and 154D recovery readiness packages
+        run: python scripts/run_recovery_horizon.py --horizons 1W 1M 154D
       - name: Run consolidated recovery-gap audit
         run: python scripts/audit_recovery_gap.py
       - name: Run regression tests
