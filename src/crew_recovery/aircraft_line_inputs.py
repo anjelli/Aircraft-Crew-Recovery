@@ -119,4 +119,5 @@ def load_320_line_inventory(
     )
     result["provisional_aircraft_id"] = result["line_num"].map(lambda x: f"LINE_{int(x)}")
     result["assignment_source"] = "AIRFLITE line-of-work; provisional, not actual tail"
-    return result.sort_values(["STD", "flight_id"]).reset_index(drop=True) if False else (aircraft, result.sort_values(["STD", "flight_id"]).reset_index(drop=True))
+    result = result.sort_values(["STD", "flight_id"]).reset_index(drop=True)
+    return aircraft, result
