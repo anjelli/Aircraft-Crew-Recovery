@@ -62,7 +62,7 @@ def main() -> int:
             exit_code = 1
         print(json.dumps(summary, indent=2))
     aggregate = {
-        "scope": "Best-effort joint operate/cancel runs; existing validated pairing columns only.",
+        "scope": ("Best-effort joint operate/cancel runs; existing validated pairing columns only." if args.pairing_mode == "existing-only" else "Best-effort joint operate/cancel runs; existing plus generated validated pairing columns within the declared pairing domain."),
         "objective": [
             "hard crew/MGT, equipment, aircraft start-state, station-continuity, and route constraints",
             "maximize operated flights (equivalently minimize cancellations) before any cost trade-off",
