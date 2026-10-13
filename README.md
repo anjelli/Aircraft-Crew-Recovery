@@ -22,13 +22,25 @@ The single recovery command runs:
 
 `output/joint_recovery/` contains `1W/`, `1M/`, and `154D/` folders plus `horizon_summary.json`. Each horizon contains a flight-level decision CSV, selected crew pairings, aircraft rotations, validation evidence, a workbook named `recovery_<days>d.xlsx`, and `summary.json`.
 
+For an experimental expanded candidate pool, run one horizon at a time first:
+
+```bash
+python scripts/run_joint_recovery_horizons.py --horizons 1W --pairing-mode expanded --output-root output/joint_recovery_expanded --time-limit-seconds 180
+```
+
+`existing-only` is the bounded default. `expanded` additionally runs the declared-domain legal pairing generator and can be expensive; it does not claim to generate every pairing that might be operationally legal. Begin with 1W before using it on longer horizons.
+
 Read `summary.json` first:
 - `OPERATE`: the flight is covered by one supplied, independently validated pairing and assigned to a feasible provisional aircraft route.
 - `CANCEL`: the heuristic/optimizer could not include the flight in the selected restricted candidate plan. This does **not** prove that cancellation is operationally necessary.
 - `UNRESOLVED_MGT`: the flight was excluded because the source MGT data is missing or conflicting. It is neither counted as operated nor silently labelled cancelled.
 - `solver_mode`: distinguishes the small-horizon MILP from the deterministic large-horizon feasibility heuristic. Heuristic results are feasible baselines, not optimal solutions.
 
-The long-horizon run uses only independently validated pairing columns already present in the pairing report. It prioritizes getting a constraint-checked baseline schedule and an explicit gap list, not proving global optimality. Retiming is not integrated.
+The one-week MILP already uses a lexicographic objective: first minimize cancellations, then minimize supplied pairing salary plus aircraft-start cost with cancellation count fixed. Long horizons use a deterministic coverage-first heuristic: it tries long-column-first, rare-flight-first, and cost-per-flight-first orders, then keeps the plan with the most operated flights and uses cost only to break coverage ties. This is not a global optimality proof.
+
+The flight-decision CSV now provides `cancellation_reason_code`, `cancellation_reason`, and `candidate_pairing_count`. Reason codes distinguish flights with no pairing candidate, pairing overlap, and aircraft-route insertion failure. Each horizon summary also compares the new best-of-three heuristic with the previous long-column-first single-order baseline using the same input candidate pool. For the MILP, the reason identifies non-selection within the current model. None of these codes proves global operational infeasibility. `UNRESOLVED_MGT` remains a separate data blocker, not a cancellation.
+
+Retiming is still not integrated. See [Recovery objective and diagnostics](docs/RECOVERY_OBJECTIVE_AND_DIAGNOSTICS.md) for objective hierarchy, reason-code definitions, and known limits.
 
 ## Input ownership
 

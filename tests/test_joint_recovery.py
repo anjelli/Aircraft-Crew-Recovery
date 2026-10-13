@@ -111,6 +111,13 @@ def test_greedy_fallback_returns_a_feasible_nonoptimal_plan():
     assert set(result.selected_pairing_ids) == {"P12", "P3"}
     assert result.optimal_over_supplied_columns is False
     assert result.minimum_cancellation_count_proven is False
+    comparison = result.heuristic_diagnostics
+    assert comparison["ordering_strategies_evaluated"] == 3
+    assert comparison["best_of_three"]["operated_flights"] == 3
+    assert comparison["operated_flights_gain_vs_single_order_baseline"] >= 0
+    assert comparison["best_of_three"]["operated_flights"] == max(
+        plan["operated_flights"] for plan in comparison["evaluated_plans"].values()
+    )
 
 
 def test_greedy_fallback_does_not_claim_incompatible_flight_is_operated():
@@ -126,3 +133,34 @@ def test_greedy_fallback_does_not_claim_incompatible_flight_is_operated():
     result = solve_joint_operate_cancel_greedy(flights, pairings, [tail])
     assert result.cancelled_flights == ("F2",)
     assert set(result.aircraft_by_flight) == {"F1"}
+    assert result.cancellation_reasons["F2"] == "NO_FEASIBLE_AIRCRAFT_ROUTE_FOR_AVAILABLE_PAIRING"
+
+
+
+def test_greedy_fallback_explains_flight_without_any_candidate():
+    flights = [
+        _flight("F1", "SIN", "KUL", "2026-10-25T08:00:00", "2026-10-25T09:00:00"),
+        _flight("F2", "BKK", "HKT", "2026-10-25T10:00:00", "2026-10-25T11:00:00"),
+    ]
+    pairings = [PairingColumn("P1", ("F1",), cost=1.0)]
+    tail = Aircraft("LINE_1", "320", "SIN", datetime.fromisoformat("2026-10-25T08:00:00"))
+    result = solve_joint_operate_cancel_greedy(flights, pairings, [tail])
+    assert result.cancelled_flights == ("F2",)
+    assert result.cancellation_reasons["F2"] == "NO_VALID_PAIRING_CANDIDATE"
+
+
+def test_greedy_fallback_explains_pairing_overlap():
+    flights = [
+        _flight("F1", "SIN", "KUL", "2026-10-25T08:00:00", "2026-10-25T09:00:00"),
+        _flight("F2", "KUL", "SIN", "2026-10-25T10:00:00", "2026-10-25T11:00:00"),
+        _flight("F3", "SIN", "BKK", "2026-10-25T12:00:00", "2026-10-25T13:00:00"),
+    ]
+    pairings = [
+        PairingColumn("P12", ("F1", "F2"), cost=2.0),
+        PairingColumn("P23", ("F2", "F3"), cost=2.0),
+    ]
+    tail = Aircraft("LINE_1", "320", "SIN", datetime.fromisoformat("2026-10-25T08:00:00"))
+    result = solve_joint_operate_cancel_greedy(flights, pairings, [tail])
+    assert result.selected_pairing_ids == ("P12",)
+    assert result.cancelled_flights == ("F3",)
+    assert result.cancellation_reasons["F3"] == "PAIRING_OVERLAP_WITH_SELECTED_PAIRING"
