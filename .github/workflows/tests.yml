@@ -22,6 +22,8 @@ jobs:
         run: python setup_workspace.py
       - name: Run regression tests
         run: python -m pytest -q tests
+      - name: Audit supplied aircraft line baseline against MGT
+        run: python scripts/audit_aircraft_line_baseline.py
       - name: Solve and export 1W, 1M, and 154D recovery schedules
         timeout-minutes: 20
         run: python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
@@ -33,5 +35,5 @@ jobs:
           path: |
             output/joint_recovery/
             output/one_week_joint_recovery/
-            output/audit/schedule_exact_duplicate_rows.csv
+            output/audit/
           if-no-files-found: warn
