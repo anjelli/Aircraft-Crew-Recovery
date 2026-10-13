@@ -34,6 +34,7 @@ class JointRecoveryResult:
     minimum_cancellation_count_proven: bool = True
     retiming_supported: bool = False
     cancellation_reasons: Mapping[str, str] = field(default_factory=dict)
+    heuristic_diagnostics: Mapping[str, object] = field(default_factory=dict)
 
 
 def _mgt_minutes(value: object, flight_id: str) -> float:
@@ -485,7 +486,7 @@ def solve_joint_operate_cancel_greedy(
         ),
     )
 
-    def construct_plan(ordered: Sequence[PairingColumn]) -> dict[str, object]:
+    def construct_plan(ordering_name: str, ordered: Sequence[PairingColumn]) -> dict[str, object]:
         routes: dict[str, list[dict[str, object]]] = {a.tail_id: [] for a in tails}
         covered: set[str] = set()
         assigned: dict[str, str] = {}
@@ -537,15 +538,21 @@ def solve_joint_operate_cancel_greedy(
         used_tails = {assigned[fid] for fid in assigned}
         total_cost += sum(float(tail_by_id[tid].start_cost) for tid in used_tails)
         return {
+            "ordering": ordering_name,
             "covered": covered,
             "assigned": assigned,
             "selected": selected,
             "total_cost": total_cost,
         }
 
-    # Evaluate a small, fixed set of orderings. Coverage is the primary score;
-    # costs never cause the heuristic to trade away an otherwise recoverable flight.
-    plans = [construct_plan(ordering) for ordering in (long_first, scarcity_first, cost_first)]
+    # The long-column order is the prior single-pass baseline. Compare it with two
+    # alternatives on identical inputs, and report the actual operated-flight delta.
+    orderings = (
+        ("long_pairings_first", long_first),
+        ("rare_flights_first", scarcity_first),
+        ("cost_per_flight_first", cost_first),
+    )
+    plans = [construct_plan(name, ordering) for name, ordering in orderings]
     best = min(
         plans,
         key=lambda plan: (
@@ -558,6 +565,36 @@ def solve_joint_operate_cancel_greedy(
     assigned = best["assigned"]
     selected = best["selected"]
     cancelled = tuple(sorted(set(records) - covered))
+    baseline = next(plan for plan in plans if plan["ordering"] == "long_pairings_first")
+    plan_comparison = {
+        str(plan["ordering"]): {
+            "operated_flights": len(plan["covered"]),
+            "cancelled_flights": len(records) - len(plan["covered"]),
+            "secondary_objective": float(plan["total_cost"]),
+        }
+        for plan in plans
+    }
+    coverage_gain = len(covered) - len(baseline["covered"])
+    heuristic_diagnostics = {
+        "ordering_strategies_evaluated": len(plans),
+        "single_order_baseline": plan_comparison["long_pairings_first"],
+        "best_of_three": {
+            "ordering": str(best["ordering"]),
+            "operated_flights": len(covered),
+            "cancelled_flights": len(cancelled),
+            "secondary_objective": float(best["total_cost"]),
+        },
+        "operated_flights_gain_vs_single_order_baseline": coverage_gain,
+        "coverage_percentage_point_gain_vs_single_order_baseline": round(
+            100.0 * coverage_gain / max(1, len(records)), 2
+        ),
+        "evaluated_plans": plan_comparison,
+        "comparison_note": (
+            "Same flight set, pairing candidate pool and aircraft inventory; the single-order "
+            "baseline is the previous long-column-first greedy ordering. Cost is only used "
+            "after operated-flight count when selecting best_of_three."
+        ),
+    }
 
     reasons: dict[str, str] = {}
     for fid in cancelled:
@@ -596,4 +633,5 @@ def solve_joint_operate_cancel_greedy(
         minimum_cancellation_count_proven=False,
         retiming_supported=False,
         cancellation_reasons=reasons,
+        heuristic_diagnostics=heuristic_diagnostics,
     )
