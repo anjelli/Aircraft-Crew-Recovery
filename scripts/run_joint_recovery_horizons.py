@@ -74,6 +74,11 @@ def main() -> int:
                 "active_flights": r.get("active_flights"),
                 "operated_flights": r.get("operated_flights"),
                 "cancelled_flights": r.get("cancelled_flights"),
+                "uncovered_or_cancelled_flights": r.get("cancelled_flights"),
+                "operated_coverage_pct": (
+                    round(100.0 * r.get("operated_flights", 0) / r["active_flights"], 2)
+                    if r.get("active_flights") else None
+                ),
                 "selected_pairings": r.get("selected_pairings"),
                 "validated_pairing_candidates": r.get("validated_pairing_candidates"),
                 "aircraft_violations": len(r.get("aircraft_violations", [])),
