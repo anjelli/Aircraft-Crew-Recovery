@@ -55,6 +55,7 @@ class ResourceConstrainedPairingPricer:
         max_duties: int = 2,
         focus_flight_ids: Sequence[str] | None = None,
         pairing_cost_fn: Callable[[Sequence[Flight], Sequence[Sequence[int]], str], float] | None = None,
+        candidate_score_fn: Callable[[PairingColumn, Sequence[Flight]], float] | None = None,
     ) -> None:
         if not flights:
             raise ValueError("flights must not be empty")
@@ -89,6 +90,7 @@ class ResourceConstrainedPairingPricer:
         self.max_duties = int(max_duties)
         self.focus_flight_ids = None if focus_flight_ids is None else frozenset(str(x) for x in focus_flight_ids)
         self.pairing_cost_fn = pairing_cost_fn
+        self.candidate_score_fn = candidate_score_fn
         self._duties: tuple[_Duty, ...] | None = None
         self._states_explored = 0
 
@@ -295,7 +297,18 @@ class ResourceConstrainedPairingPricer:
         unique: dict[str, PairingColumn] = {}
         for column in self._candidate_columns():
             unique.setdefault(column.column_id, column)
-        return tuple(unique[key] for key in sorted(unique))
+        columns = list(unique.values())
+        if self.candidate_score_fn is None:
+            return tuple(sorted(columns, key=lambda col: col.column_id))
+        by_id = {str(f["flight_id"]): f for f in self.flights}
+        scored = []
+        for column in columns:
+            score = float(self.candidate_score_fn(column, [by_id[fid] for fid in column.flight_ids]))
+            if not isfinite(score):
+                raise ValueError(f"Non-finite candidate score for {column.column_id}")
+            scored.append((score, column.column_id, column))
+        # Ranking changes enumeration order only. No candidate is discarded.
+        return tuple(item[2] for item in sorted(scored, key=lambda item: (item[0], item[1])))
 
     def __call__(self, dual_prices, active_column_ids, reduced_cost_tolerance, batch_size):
         # Local import avoids a module-level cycle with integrated_column_generation.
