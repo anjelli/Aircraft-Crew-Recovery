@@ -1,50 +1,50 @@
-# Project structure and ownership
+# Project structure
 
-This is the canonical layout for the repository. Preserve supplied source material and generated evidence separately.
+Keep one canonical runtime path. Preserve supplied source material and keep generated outputs out of the input path.
 
-\`\`\`text
+```text
 Aircraft-Crew-Recovery/
-├── originals/                 # Supplied source files and raw inputs; immutable
-├── input/                     # Prepared canonical runtime inputs
-├── src/crew_recovery/          # Reusable validation, costing, pricing, network and solver modules
-├── scripts/                   # Executable experiments, audits and recovery runners
-├── tests/                     # Unit, regression and exhaustive-reference tests
-├── docs/                      # Architecture, objective policy, runbooks and project notes
-├── patches/                   # Historical .orig snapshots only; never imported as active code
-├── output/                    # Generated reports, workbooks, CSV/JSON and audit artifacts
-├── logs/                      # Historical run logs; not authoritative current outputs
-└── *.py                       # Backward-compatible command wrappers; keep until downstream use is retired
-\`\`\`
+├── originals/                 # Immutable supplied source files
+├── input/                     # Prepared schedule.xlsx and pairing_report.xlsx
+├── src/crew_recovery/         # Reusable MGT, validation, costing and solver code
+├── scripts/
+│   ├── prep_inputs.py
+│   ├── setup_workspace.py
+│   └── run_joint_recovery_horizons.py  # Canonical 1W / 1M / 154D entry point
+├── tests/                     # Unit and regression tests
+├── docs/                      # Architecture and handoff notes
+├── output/joint_recovery/     # Current three-horizon deliverables
+├── logs/                      # Historical run evidence only
+└── patches/                   # Archived snapshots only; never imported as active code
+```
 
-## Where to put files
+Other existing audit and experiment scripts remain available for research, but they are not required for the standard recovery run. Root-level command wrappers are retained for compatibility; do not add a second implementation there.
 
-- **Never edit or move files from \`originals/\`.** Keep source inputs and supplied implementations byte-for-byte intact.
-- Put cleaned/prepared copies in \`input/\`; the workspace setup script is the single preparation entry point.
-- Put importable business logic in \`src/crew_recovery/\`. Do not create a second implementation at the repository root.
-- Put runnable commands in \`scripts/\`; root-level Python files are compatibility wrappers for established command names.
-- Put automated checks in \`tests/\` and operational assumptions / run instructions in \`docs/\`.
-- Treat \`output/\` and \`logs/\` as generated or historical evidence. Do not hand-edit generated schedules and do not commit large run outputs as source code.
-- Keep \`patches/*.orig\` as archive material only; they are not active solvers.
+## Canonical run
 
-## Canonical commands
-
-From the repository root:
-
-\`\`\`bash
+```bash
 python -m pip install -r requirements.txt
 python setup_workspace.py
 python -m pytest -q tests
-python scripts/run_recovery_horizon.py --horizons 1W 1M 154D
-python scripts/run_one_week_joint_recovery.py --start-date 2026-10-25 --days 7 --time-limit-seconds 120
-python scripts/run_joint_recovery_horizons.py --time-limit-seconds 30
-\`\`\`
+python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
+```
 
-## Interpreting recovery output
+## Input ownership
 
-- \`output/recovery/\` contains **readiness exports**, not optimizer decisions; \`UNRESOLVED\` means no decision was made.
-- \`output/one_week_joint_recovery/\` contains the one-week joint prototype's decision-level artifacts.
-- \`output/joint_recovery/{1W,1M,154D}/\` contains bounded operate/cancel runs using existing validated pairing-report columns only.
-- Read each \`summary.json\` before using its CSVs. Check status, blockers, uncovered/cancelled counts, aircraft violations, crew coverage errors, tail-inventory flag and optimality scope.
-- A run that is optimal over supplied pairing columns is not globally optimal over every possible legal pairing.
-- \`LINE_n\` resources are provisional lines of work, not registered aircraft. Do not report them as actual tail assignments.
-- Current joint runs do not optimize flight-copy retiming. The configured lexicographic policy lists retiming ahead of operating cost, but the retiming term remains inactive until flight-copy selection is integrated.
+- Read prepared timetable and pairing report from `input/`.
+- Read supplied MGT, FDP, cost and lines-of-work sources from `originals/`.
+- Never choose an input based on whichever duplicate filename happens to exist in the repository root.
+- Never edit or move the supplied files in `originals/`.
+- The setup step logs exact duplicate schedule rows before preparing the canonical schedule.
+
+## Output ownership
+
+Each of `output/joint_recovery/{1W,1M,154D}/` contains a workbook, flight-level decisions, selected pairings, aircraft rotations, validation evidence and a JSON summary. `horizon_summary.json` compares horizons.
+
+Interpret statuses precisely:
+- `PROTOTYPE_OPTIMAL_WITH_PROVISIONAL_TAILS`: MILP optimal over the supplied pairing/route domain; line identifiers are provisional.
+- `HEURISTIC_FEASIBLE_NOT_OPTIMAL`: deterministic large-horizon fallback found a constraint-feasible plan over supplied pairing columns.
+- `PARTIAL_RECOVERY_UNRESOLVED_MGT`: a plan exists for flights with resolvable MGT; unresolved flights are explicitly listed and not counted as cancellations.
+- Any `CANCEL` decision means excluded from this restricted plan, not proven impossible to operate with a richer candidate pool.
+
+The long-horizon model is not a global optimizer. Retiming, verified physical tail registrations, and the full operational objective are not integrated.
