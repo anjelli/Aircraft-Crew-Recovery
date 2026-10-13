@@ -112,10 +112,10 @@ def test_greedy_fallback_returns_a_feasible_nonoptimal_plan():
     assert result.optimal_over_supplied_columns is False
     assert result.minimum_cancellation_count_proven is False
     comparison = result.heuristic_diagnostics
-    assert comparison["ordering_strategies_evaluated"] == 3
-    assert comparison["best_of_three"]["operated_flights"] == 3
-    assert comparison["operated_flights_gain_vs_single_order_baseline"] >= 0
-    assert comparison["best_of_three"]["operated_flights"] == max(
+    assert comparison["plans_evaluated"] == 8
+    assert comparison["best_plan"]["operated_flights"] == 3
+    assert comparison["operated_flights_gain_vs_single_pass_baseline"] >= 0
+    assert comparison["best_plan"]["operated_flights"] == max(
         plan["operated_flights"] for plan in comparison["evaluated_plans"].values()
     )
 
@@ -164,3 +164,34 @@ def test_greedy_fallback_explains_pairing_overlap():
     assert result.selected_pairing_ids == ("P12",)
     assert result.cancelled_flights == ("F3",)
     assert result.cancellation_reasons["F3"] == "PAIRING_OVERLAP_WITH_SELECTED_PAIRING"
+
+
+
+def test_greedy_fallback_uses_supplied_line_map_to_recover_chronological_chain():
+    # Deliberately make the cheapest pairing the last flight, which causes the
+    # old cost-ordered one-pass heuristic to seed the route too late. The
+    # chronological baseline order can preserve the supplied feasible line.
+    flights = [
+        _flight("F1", "SIN", "KUL", "2026-10-25T08:00:00", "2026-10-25T09:00:00"),
+        _flight("F2", "KUL", "SIN", "2026-10-25T10:00:00", "2026-10-25T11:00:00"),
+        _flight("F3", "SIN", "BKK", "2026-10-25T12:00:00", "2026-10-25T13:00:00"),
+    ]
+    pairings = [
+        PairingColumn("P1", ("F1",), cost=3.0),
+        PairingColumn("P2", ("F2",), cost=2.0),
+        PairingColumn("P3", ("F3",), cost=0.1),
+    ]
+    tail = Aircraft("LINE_1", "320", "SIN", datetime.fromisoformat("2026-10-25T08:00:00"))
+    result = solve_joint_operate_cancel_greedy(
+        flights, pairings, [tail],
+        preferred_aircraft_by_flight={"F1": "LINE_1", "F2": "LINE_1", "F3": "LINE_1"},
+    )
+    assert result.cancellation_count == 0
+    assert set(result.aircraft_by_flight) == {"F1", "F2", "F3"}
+    assert result.heuristic_diagnostics["preferred_aircraft_line_map_complete"] is True
+    assert result.heuristic_diagnostics["plans_evaluated"] == 16
+    assert result.heuristic_diagnostics["best_plan"]["operated_flights"] == 3
+    assert result.heuristic_diagnostics["single_pass_baseline"]["operated_flights"] == 1
+    assert result.heuristic_diagnostics["best_plan"]["assignment_mode"] in {
+        "line_locked", "line_preferred", "free"
+    }
