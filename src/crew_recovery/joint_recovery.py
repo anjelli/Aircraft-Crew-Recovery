@@ -384,9 +384,13 @@ def solve_joint_operate_cancel_greedy(
     minimum cancellations. Mandatory crew/MGT, equipment and route constraints
     remain hard constraints.
     """
-    records = {str(f["flight_id"]): dict(f) for f in flights}
-    if not records:
+    flight_rows = [dict(f) for f in flights]
+    if not flight_rows:
         raise ValueError("flights must not be empty")
+    flight_ids = [str(f.get("flight_id", "")).strip() for f in flight_rows]
+    if any(not fid for fid in flight_ids) or len(flight_ids) != len(set(flight_ids)):
+        raise ValueError("flight_id values must be unique and non-empty")
+    records = {str(f["flight_id"]).strip(): f for f in flight_rows}
     tails = list(aircraft)
     if not tails:
         raise ValueError("aircraft inventory must not be empty")
@@ -396,6 +400,10 @@ def solve_joint_operate_cancel_greedy(
 
     def flight_ids_for(pairing: PairingColumn) -> tuple[str, ...]:
         return tuple(str(fid) for fid in pairing.flight_ids)
+
+    column_ids = [p.column_id for p in pairings]
+    if len(column_ids) != len(set(column_ids)):
+        raise ValueError("pairing column IDs must be unique")
 
     # Exclude malformed columns with repeated or out-of-scope flight IDs rather
     # than allowing one pairing to cover a flight more than once.
