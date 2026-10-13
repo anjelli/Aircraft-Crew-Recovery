@@ -29,6 +29,7 @@ class JointRecoveryResult:
     secondary_objective: float
     solver_message: str
     optimal_over_supplied_columns: bool = True
+    minimum_cancellation_count_proven: bool = True
     retiming_supported: bool = False
 
 
@@ -228,32 +229,54 @@ def solve_joint_operate_cancel(
             raise ValueError("time_limit_seconds must be finite and positive")
         options["time_limit"] = float(time_limit_seconds)
 
-    # Pass 1: prove the minimum cancellation count.
-    cancellation_objective = np.zeros(n_var, dtype=float)
-    cancellation_objective[cancel0:cancel0 + n_f] = 1.0
-    first = milp(c=cancellation_objective, integrality=integrality, bounds=bounds, constraints=constraints, options=options)
-    if first.x is None or first.status != 0:
-        raise RuntimeError(f"Minimum-cancellation pass not proven optimal: {first.message}")
-    min_cancellations = int(round(float(np.sum(first.x[cancel0:cancel0 + n_f]))))
-
-    # Pass 2: fix the cancellation optimum before optimizing lower priorities.
-    cancel_row = lil_matrix((1, n_var), dtype=float)
-    for i in range(n_f):
-        cancel_row[0, cancel0 + i] = 1.0
-    cancel_constraint = LinearConstraint(cancel_row.tocsr(), [min_cancellations], [min_cancellations])
     secondary = np.zeros(n_var, dtype=float)
     for p_idx, p in enumerate(columns):
         secondary[x0 + p_idx] = float(p.cost)
     for (a, _i), var in source_index.items():
         secondary[var] = float(tails[a].start_cost)
-    second = milp(
-        c=secondary, integrality=integrality, bounds=bounds,
-        constraints=constraints + [cancel_constraint], options=options,
-    )
-    if second.x is None or second.status != 0:
-        raise RuntimeError(f"Secondary pass not proven optimal: {second.message}")
 
-    selected = tuple(columns[p].column_id for p in range(n_p) if second.x[x0 + p] > 0.5)
+    # Pass 1: prove the minimum cancellation count. If the time limit returns a
+    # feasible integer incumbent, preserve it as a clearly labelled feasible
+    # plan rather than discarding it or pretending it is optimal.
+    cancellation_objective = np.zeros(n_var, dtype=float)
+    cancellation_objective[cancel0:cancel0 + n_f] = 1.0
+    first = milp(c=cancellation_objective, integrality=integrality, bounds=bounds, constraints=constraints, options=options)
+    if first.x is None:
+        raise RuntimeError(f"Minimum-cancellation pass returned no feasible incumbent: {first.message}")
+    cancellation_optimal = first.status == 0
+    min_cancellations = int(round(float(np.sum(first.x[cancel0:cancel0 + n_f]))))
+    solution = first.x
+    secondary_optimal = False
+    solver_message = str(first.message)
+
+    if cancellation_optimal:
+        cancel_row = lil_matrix((1, n_var), dtype=float)
+        for i in range(n_f):
+            cancel_row[0, cancel0 + i] = 1.0
+        cancel_constraint = LinearConstraint(cancel_row.tocsr(), [min_cancellations], [min_cancellations])
+        second = milp(
+            c=secondary, integrality=integrality, bounds=bounds,
+            constraints=constraints + [cancel_constraint], options=options,
+        )
+        if second.x is not None:
+            solution = second.x
+            secondary_optimal = second.status == 0
+            solver_message = str(second.message) if secondary_optimal else (
+                "Minimum cancellation count proven optimal; secondary objective not proven optimal: "
+                + str(second.message)
+            )
+        else:
+            solver_message = (
+                "Minimum cancellation count proven optimal; secondary pass returned no incumbent: "
+                + str(second.message)
+            )
+    else:
+        solver_message = (
+            "Feasible incumbent returned, but minimum cancellation count is not proven optimal: "
+            + str(first.message)
+        )
+
+    selected = tuple(columns[p].column_id for p in range(n_p) if solution[x0 + p] > 0.5)
     cancelled = tuple(ids[i] for i in range(n_f) if second.x[cancel0 + i] > 0.5)
     selected_source = {
         key: var for key, var in source_index.items() if second.x[var] > 0.5
@@ -293,6 +316,8 @@ def solve_joint_operate_cancel(
         selected_pairing_ids=selected,
         aircraft_by_flight=aircraft_by_flight,
         cancellation_count=len(cancelled),
-        secondary_objective=float(second.fun),
-        solver_message=str(second.message),
+        secondary_objective=float(np.dot(secondary, solution)),
+        solver_message=solver_message,
+        optimal_over_supplied_columns=bool(cancellation_optimal and secondary_optimal),
+        minimum_cancellation_count_proven=bool(cancellation_optimal),
     )
