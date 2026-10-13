@@ -87,6 +87,7 @@ def load_aircraft_line_inventory(
     lines["Flt Num"] = lines["Flt Num"].astype(int)
     lines["From"] = lines["Dept Sta"].astype(str).str.strip().str.upper()
     lines["To"] = lines["Arvl Sta"].astype(str).str.strip().str.upper()
+    lines["Eqp"] = lines["Equip"].astype(str).str.strip()
     lines["flight_id"] = [_fid(n, t) for n, t in zip(lines["Flt Num"], lines["STD"])]
 
     schedule = pd.read_excel(schedule_path)
