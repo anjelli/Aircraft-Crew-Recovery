@@ -98,7 +98,9 @@ def load_aircraft_line_inventory(
     schedule = schedule.copy()
     schedule["STD"] = pd.to_datetime(schedule["STD"], errors="coerce")
     schedule["STA"] = pd.to_datetime(schedule["STA"], errors="coerce")
-    schedule["Flt Num"] = pd.to_numeric(schedule["Flt Num"], errors="coerce")
+    schedule["route_STD"] = pd.to_datetime(schedule["STD_sin"], errors="coerce") if "STD_sin" in schedule else schedule["STD"]
+    schedule["route_STA"] = pd.to_datetime(schedule["STA_sin"], errors="coerce") if "STA_sin" in schedule else schedule["STA"]
+    schedule["Flt Num" = pd.to_numeric(schedule["Flt Num"], errors="coerce")
     schedule["Eqp"] = schedule["Eqp"].astype(str).str.strip()
     schedule = schedule.loc[
         schedule["STD"].notna()
@@ -142,17 +144,22 @@ def load_aircraft_line_inventory(
     mixed = {int(k): sorted(v) for k, v in equipment_by_line.items() if len(v) != 1}
     if mixed:
         raise ValueError(f"AIRFLITE line changes equipment within the horizon: {mixed}")
+    route_std_by_fid = schedule.set_index("flight_id")["route_STD"].to_dict()
+    route_sta_by_fid = schedule.set_index("flight_id")["route_STA"].to_dict()
+    lines["route_STD"] = lines["flight_id"].map(route_std_by_fid)
+    lines["route_STA"] = lines["flight_id"].map(route_sta_by_fid)
+    first = lines.sort_values(["Line Num", "STD", "flight_id"]).groupby("Line Num", as_index=False).first()
     aircraft = [
         Aircraft(
             tail_id=f"LINE_{int(r['Line Num'])}",
             equipment=str(r["Equip"]),
             start_station=str(r["From"]),
-            available_at=pd.Timestamp(r["STD"]).to_pydatetime(),
+            available_at=pd.Timestamp(r["route_STD"]).to_pydatetime(),
         )
         for _, r in first.iterrows()
     ]
     result = lines[
-        ["flight_id", "Line Num", "Flt Num", "STD", "STA", "From", "To", "Equip"]
+        ["flight_id", "Line Num", "Flt Num", "STD", "STA", "route_STD", "route_STA", "From", "To", "Equip"]
     ].rename(columns={"Line Num": "line_num", "Flt Num": "flight_number", "Equip": "Eqp"})
     result["provisional_aircraft_id"] = result["line_num"].map(lambda x: f"LINE_{int(x)}")
     result["assignment_source"] = "AIRFLITE line-of-work; provisional, not actual tail"
