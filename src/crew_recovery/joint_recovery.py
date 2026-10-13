@@ -18,6 +18,7 @@ from scipy.sparse import lil_matrix
 
 from column_generation import PairingColumn
 from crew_recovery.aircraft_rotation import Aircraft
+from crew_recovery.connection_scoring import connection_priority_score
 
 
 @dataclass(frozen=True)
@@ -133,7 +134,7 @@ def solve_joint_operate_cancel(
     # A single route network per equipment class; each selected source arc
     # starts one path from a specific resource, so tail identities are recovered
     # by tracing selected arcs from those source flights.
-    arcs: list[tuple[int, int, int]] = []
+    arc_candidates: list[tuple[float, int, int, int]] = []
     incoming: dict[tuple[int, int], list[int]] = {(c, i): [] for c in range(n_c) for i in range(n_f)}
     outgoing: dict[tuple[int, int], list[int]] = {(c, i): [] for c in range(n_c) for i in range(n_f)}
     for c, eqp in enumerate(classes):
@@ -146,10 +147,17 @@ def solve_joint_operate_cancel(
                 if records[j]["STD"] < first["STA"]:
                     continue
                 if _can_follow(first, records[j]):
-                    k = len(arcs)
-                    arcs.append((c, i, j))
-                    outgoing[c, i].append(k)
-                    incoming[c, j].append(k)
+                    score = connection_priority_score(first, records[j])
+                    arc_candidates.append((score, c, i, j))
+    # Rank promising direct returns and short feasible ground gaps first, but
+    # retain every legal arc. Scoring is not a hard pruning rule.
+    arc_candidates.sort()
+    arcs: list[tuple[int, int, int]] = []
+    for _score, c, i, j in arc_candidates:
+        k = len(arcs)
+        arcs.append((c, i, j))
+        outgoing[c, i].append(k)
+        incoming[c, j].append(k)
 
     # Variables: pairing selection x, cancellation c, class-flight y,
     # resource-specific source arcs s, and equipment-class route arcs z.

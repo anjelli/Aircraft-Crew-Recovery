@@ -22,6 +22,7 @@ for p in (ROOT, SRC):
 
 from column_generation import PairingColumn
 from crew_recovery.aircraft_line_inputs import load_aircraft_line_inventory
+from crew_recovery.aircraft_inventory import load_registered_aircraft_inventory
 from crew_recovery.independent_validator import (
     MGTResolver,
     Rules,
@@ -33,6 +34,10 @@ from crew_recovery.independent_validator import (
     validate_existing,
 )
 from crew_recovery.resource_constrained_pricing import ResourceConstrainedPairingPricer
+from crew_recovery.crew_costing import crew_salary_cost, generated_pairing_cost_callback
+from crew_recovery.pairing_scoring import pairing_efficiency_score
+from crew_recovery.operational_objective import objective_contract
+from crew_recovery.objective_spec import load_cost_parameters
 from crew_recovery.joint_recovery import solve_joint_operate_cancel
 
 
@@ -111,7 +116,13 @@ def main() -> int:
         "status": "BLOCKED_NOT_OPTIMIZED",
         "equipment_in_scope": ["320", "32N", "32P", "32Q"],
         "retiming_supported": False,
+        "objective_policy": ["minimize_cancellations", "minimize_midnight_aware_crew_salary_plus_aircraft_start_cost"],
+        "objective_contract": objective_contract(retiming_integrated=False, crew_roster_integrated=False),
+        "objective_cost_basis": "Crew salary uses cost_parameters.csv man_day_cost multiplied by each duty calendar day touched, including the second day when duty crosses midnight; other allowances and retiming are not yet integrated.",
+        "candidate_ranking": "Salary cost per covered sector, then duty count; ordering only, every legal generated column is retained. This is a heuristic baseline, not trained ML.",
         "aircraft_resources_are_provisional": True,
+        "registered_tail_inventory_loaded": False,
+        "operational_acceptance": False,
         "optimality_scope": "Only independently validated existing/generated pairing columns and generated aircraft route arcs.",
         "blockers": [],
     }
@@ -138,13 +149,26 @@ def main() -> int:
             (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
             return 0
 
-        aircraft, line_assignments = load_aircraft_line_inventory(
+        provisional_aircraft, line_assignments = load_aircraft_line_inventory(
             ROOT / "low_kgp", ROOT / "schedule_kgp.xlsx",
             start_date="2026-10-25", end_date="2027-03-27",
         )
         line_assignments.to_csv(out / "provisional_line_inventory.csv", index=False)
+        registered_inventory_path = ROOT / "aircraft_inventory.csv"
+        if registered_inventory_path.exists():
+            aircraft = load_registered_aircraft_inventory(registered_inventory_path)
+            summary["aircraft_resources_are_provisional"] = False
+            summary["registered_tail_inventory_loaded"] = True
+        else:
+            aircraft = provisional_aircraft
+            summary["blockers"].append({
+                "code": "VERIFIED_TAIL_INVENTORY_MISSING",
+                "detail": "No aircraft_inventory.csv found. LINE_n resources are only provisional line-of-work proxies; the solve is a research baseline, not an operational tail assignment.",
+            })
 
         report = pd.read_excel(ROOT / "pairing_report.xlsx")
+        costs = load_cost_parameters(ROOT / "cost_parameters.csv")
+        man_day_cost = costs["man_day_cost"]
         rules = Rules(fdp=load_fdp(ROOT / "fdp_rules.csv"), dsb=60, feb=0, deb=30, max_layover_h=72.0)
         statuses, violations, unmatched, skipped = validate_existing(
             report, prepared, rules, start=start, end=end
@@ -169,7 +193,10 @@ def main() -> int:
             col = PairingColumn(
                 column_id=f"PAIR_{pid}",
                 flight_ids=flight_ids,
-                cost=1.0,
+                cost=crew_salary_cost(
+                    group.to_dict("records"), splits, man_day_cost=man_day_cost,
+                    duty_start_buffer_minutes=rules.dsb, duty_end_buffer_minutes=rules.deb,
+                ),
                 pairing_type="independently_validated_existing_report",
                 is_multi_day=len(splits) > 1,
                 num_duties=len(splits),
@@ -202,6 +229,12 @@ def main() -> int:
             layover_stations=_derive_layover_stations(report, "SIN"),
             validator=validate_generated,
             pairing_cost=1.0,
+            pairing_cost_fn=generated_pairing_cost_callback(
+                man_day_cost=man_day_cost,
+                duty_start_buffer_minutes=rules.dsb,
+                duty_end_buffer_minutes=rules.deb,
+            ),
+            candidate_score_fn=pairing_efficiency_score,
             hub="SIN",
             max_sectors_per_duty=4,
             max_duties=3,
@@ -292,6 +325,8 @@ def main() -> int:
             summary["status"] = "PROTOTYPE_OPTIMAL_OVER_SUPPLIED_COLUMNS"
         else:
             summary["status"] = "FEASIBLE_NOT_PROVEN_OPTIMAL"
+        if not summary["registered_tail_inventory_loaded"] and summary["status"] == "PROTOTYPE_OPTIMAL_OVER_SUPPLIED_COLUMNS":
+            summary["status"] = "PROTOTYPE_OPTIMAL_WITH_PROVISIONAL_TAILS"
         summary.update({
             "active_flights": int(len(active)),
             "existing_valid_pairing_candidates": int(existing_valid_count),
@@ -300,6 +335,7 @@ def main() -> int:
             "three_duty_focus_flights": int(len(uncovered_flights)),
             "generated_pairing_candidates": int(generated_count),
             "generated_legal_pairing_domain_size": int(len(generated_pool)),
+            "candidate_scoring": "salary-cost-per-sector heuristic; all generated legal columns retained",
             "pricing_explored_states": int(pricer.states_explored),
             "pricing_domain_status": "all-legal-one/two-duty-domain-plus-three-duty-options-targeted-to-uncovered-flights",
             "duplicate_generated_pairings_skipped": int(duplicate_generated),
@@ -310,14 +346,18 @@ def main() -> int:
             "operated_flights": int((decisions["recovery_action"] == "OPERATE").sum()),
             "cancelled_flights": int(len(cancelled)),
             "aircraft_resources": int(len(aircraft)),
+            "registered_tail_inventory_loaded": bool(summary["registered_tail_inventory_loaded"]),
+            "operational_acceptance": False,
+            "operational_acceptance_reason": "Prototype-only: retiming/copy selection, approved tail-state reconciliation, full cost terms, and owner sign-off are not all integrated.",
             "aircraft_violations": aircraft_violations,
             "crew_coverage_errors": crew_coverage_errors,
             "solver_message": result.solver_message,
             "secondary_objective": result.secondary_objective,
+            "crew_salary_cost_basis": "man_day_cost per duty calendar day; crossing midnight counts both calendar dates",
             "minimum_cancellation_count_proven": result.minimum_cancellation_count_proven,
             "full_lexicographic_optimum_proven": result.optimal_over_supplied_columns,
             "assumptions": [
-                "Aircraft LINE_n identifiers and starting states are inferred from AIRFLITE lines of work, not verified tail registrations.",
+                "When aircraft_inventory.csv is absent, LINE_n identifiers and starting states are inferred from AIRFLITE lines of work, not verified tail registrations.",
                 "MGTResolver uses the validator's documented demo aircraft-group mapping; owner-approved equipment-group compatibility remains required.",
                 "No retiming or flight-copy generation is supported in this prototype.",
                 "Optimality is restricted to existing pairing-report columns independently marked VALID and the generated aircraft route arcs.",
