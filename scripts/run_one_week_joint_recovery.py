@@ -179,9 +179,16 @@ def main() -> int:
             seen_sequences.add(flight_ids)
         existing_valid_count = len(candidate_columns)
 
+        candidate_degree = {str(fid): 0 for fid in active["flight_id"]}
+        for col in candidate_columns:
+            for fid in col.flight_ids:
+                candidate_degree[fid] = candidate_degree.get(fid, 0) + 1
+        uncovered_flights = {fid for fid, degree in candidate_degree.items() if degree == 0}
+
         # Generate additional legal pairing columns over the active week to
-        # reduce dependence on the finite report pool. This is an explicit,
-        # bounded domain: hub turns and two-duty hub/layover/hub pairings.
+        # reduce dependence on the finite report pool. One-/two-duty options
+        # are enumerated in the declared domain; three-duty options are focused
+        # on flights that currently have no valid pairing candidate.
         def validate_generated(seq, splits, pairing_type):
             return check_pairing("generated-candidate", list(seq), splits, rules)
 
@@ -198,13 +205,9 @@ def main() -> int:
             hub="SIN",
             max_sectors_per_duty=4,
             max_duties=3,
+            focus_flight_ids=uncovered_flights,
         )
-        candidate_degree = {str(fid): 0 for fid in active["flight_id"]}
-        for col in candidate_columns:
-            for fid in col.flight_ids:
-                candidate_degree[fid] = candidate_degree.get(fid, 0) + 1
-        # Price uncovered/fragile flights first; this keeps the generated pool
-        # focused instead of materializing every legal pairing in the week.
+        # Record the pre-generation coverage gaps so the candidate expansion is auditable.
         uncovered_before_pricing = sum(degree == 0 for degree in candidate_degree.values())
         single_option_before_pricing = sum(degree == 1 for degree in candidate_degree.values())
         generated_pool = pricer.generate_candidates()
@@ -294,6 +297,7 @@ def main() -> int:
             "existing_valid_pairing_candidates": int(existing_valid_count),
             "flights_without_existing_pairing_candidate": int(uncovered_before_pricing),
             "flights_with_one_existing_pairing_candidate": int(single_option_before_pricing),
+            "three_duty_focus_flights": int(len(uncovered_flights)),
             "generated_pairing_candidates": int(generated_count),
             "generated_legal_pairing_domain_size": int(len(generated_pool)),
             "pricing_explored_states": int(pricer.states_explored),
