@@ -549,10 +549,24 @@ def solve_joint_operate_cancel_greedy(
                             [tail_by_id[preferred_tail_id]]
                             if preferred_tail_id in tail_by_id else []
                         )
+                    elif assignment_mode == "line_preferred" and preferred_tail_id in tail_by_id:
+                        # Fast path: if the original line can take the flight,
+                        # preserve it without scoring all other aircraft. Only
+                        # search alternative tails when the preferred line is blocked.
+                        preferred_found = insertion_position(
+                            routes[preferred_tail_id], flight, tail_by_id[preferred_tail_id]
+                        )
+                        if preferred_found is not None:
+                            preferred_pos, preferred_gap = preferred_found
+                            options = [(0, preferred_gap, len(routes[preferred_tail_id]), preferred_tail_id, preferred_pos)]
+                            candidate_tails = []
+                        else:
+                            candidate_tails = [tail for tail in tails if tail.tail_id != preferred_tail_id]
+                            options = []
                     else:
                         candidate_tails = tails
+                        options = []
 
-                    options = []
                     for tail in candidate_tails:
                         found = insertion_position(routes[tail.tail_id], flight, tail)
                         if found is None:
@@ -617,14 +631,21 @@ def solve_joint_operate_cancel_greedy(
         }
 
     plans: list[dict[str, object]] = []
-    # Keep the prior one-pass plans as a true comparator.
-    for ordering_name, ordering in orderings.items():
-        plans.append(construct_plan(ordering_name, ordering, "free", retry_passes=0))
+    # Keep the previous three one-pass strategies as exact comparators.
+    historical_ordering_names = (
+        "long_pairings_first", "rare_flights_first", "cost_per_flight_first"
+    )
+    for ordering_name in historical_ordering_names:
+        plans.append(construct_plan(
+            ordering_name, orderings[ordering_name], "free", retry_passes=0
+        ))
 
-    # Revisit rejected pairings after other accepted pairings have extended
-    # aircraft routes. Prefer the supplied line when it is available, but allow
-    # reassignment as a second option.
-    for ordering_name, ordering in orderings.items():
+    # Retry under the two orders most useful for repair: chronological order
+    # builds predecessor routes first; cost-per-flight preserves the prior best
+    # coverage result as an additional reference.
+    retry_ordering_names = ("chronological_first", "cost_per_flight_first")
+    for ordering_name in retry_ordering_names:
+        ordering = orderings[ordering_name]
         plans.append(construct_plan(
             ordering_name, ordering, "free", retry_passes=max_retry_passes
         ))
@@ -632,10 +653,14 @@ def solve_joint_operate_cancel_greedy(
             plans.append(construct_plan(
                 ordering_name, ordering, "line_preferred", retry_passes=max_retry_passes
             ))
-        if has_complete_line_map:
-            plans.append(construct_plan(
-                ordering_name, ordering, "line_locked", retry_passes=max_retry_passes
-            ))
+
+    # A strict same-line plan is the cleanest diagnostic for whether the existing
+    # supplied line baseline can carry the candidate pool without reconstruction.
+    if has_complete_line_map:
+        plans.append(construct_plan(
+            "chronological_first", orderings["chronological_first"],
+            "line_locked", retry_passes=max_retry_passes
+        ))
 
     best = min(
         plans,
