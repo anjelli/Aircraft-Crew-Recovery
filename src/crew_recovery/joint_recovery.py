@@ -375,15 +375,20 @@ def solve_joint_operate_cancel_greedy(
     flights: Sequence[Mapping[str, object]],
     pairings: Sequence[PairingColumn],
     aircraft: Sequence[Aircraft],
+    *,
+    preferred_aircraft_by_flight: Mapping[str, str] | None = None,
+    max_retry_passes: int = 4,
 ) -> JointRecoveryResult:
-    """Build a deterministic feasible plan using coverage-first multi-start greedy.
+    """Construct and compare bounded feasible recovery heuristics.
 
-    Three deterministic pairing orders are evaluated: long columns first,
-    rare-flight columns first, and low salary per covered flight first. The plan
-    operating the most flights wins; pairing plus aircraft-start cost breaks
-    ties. This is a heuristic over the supplied columns, not a proof of global
-    minimum cancellations. Mandatory crew/MGT, equipment and route constraints
-    remain hard constraints.
+    The supplied AIRFLITE line assignment may be passed as a preference map.
+    The function compares the previous single-pass baseline against retry-based
+    selection that either prefers those line IDs or locks flights to those lines.
+    Pairings rejected only because a prerequisite aircraft leg has not yet been
+    inserted can be retried after other pairings have been accepted.
+
+    All crew/MGT, equipment, starting-state, station-continuity, and route rules
+    remain hard. These deterministic plans are heuristics, not global optima.
     """
     flight_rows = [dict(f) for f in flights]
     if not flight_rows:
@@ -392,12 +397,25 @@ def solve_joint_operate_cancel_greedy(
     if any(not fid for fid in flight_ids) or len(flight_ids) != len(set(flight_ids)):
         raise ValueError("flight_id values must be unique and non-empty")
     records = {str(f["flight_id"]).strip(): f for f in flight_rows}
+
     tails = list(aircraft)
     if not tails:
         raise ValueError("aircraft inventory must not be empty")
     tail_by_id = {a.tail_id: a for a in tails}
     if len(tail_by_id) != len(tails):
         raise ValueError("aircraft tail_id values must be unique")
+    if not isinstance(max_retry_passes, int) or max_retry_passes < 0:
+        raise ValueError("max_retry_passes must be a nonnegative integer")
+
+    preferred_map = {
+        str(fid).strip(): str(tail_id).strip()
+        for fid, tail_id in (preferred_aircraft_by_flight or {}).items()
+        if str(fid).strip() in records
+    }
+    has_complete_line_map = (
+        len(preferred_map) == len(records)
+        and all(tail_id in tail_by_id for tail_id in preferred_map.values())
+    )
 
     def flight_ids_for(pairing: PairingColumn) -> tuple[str, ...]:
         return tuple(str(fid) for fid in pairing.flight_ids)
@@ -406,8 +424,6 @@ def solve_joint_operate_cancel_greedy(
     if len(column_ids) != len(set(column_ids)):
         raise ValueError("pairing column IDs must be unique")
 
-    # Exclude malformed columns with repeated or out-of-scope flight IDs rather
-    # than allowing one pairing to cover a flight more than once.
     usable_pairings = [
         p for p in pairings
         if p.flight_ids
@@ -457,102 +473,196 @@ def solve_joint_operate_cancel_greedy(
     def salary_per_flight(pairing: PairingColumn) -> float:
         return float(pairing.cost) / max(1, len(pairing_fids[pairing.column_id]))
 
-    long_first = sorted(
-        usable_pairings,
-        key=lambda p: (
-            -len(pairing_fids[p.column_id]),
-            salary_per_flight(p),
-            earliest_start(p),
-            p.column_id,
+    orderings = {
+        "chronological_first": sorted(
+            usable_pairings,
+            key=lambda p: (
+                earliest_start(p), -len(pairing_fids[p.column_id]),
+                salary_per_flight(p), p.column_id,
+            ),
         ),
-    )
-    scarcity_first = sorted(
-        usable_pairings,
-        key=lambda p: (
-            -sum(1.0 / max(1, candidate_degree[fid]) for fid in pairing_fids[p.column_id]),
-            -len(pairing_fids[p.column_id]),
-            salary_per_flight(p),
-            earliest_start(p),
-            p.column_id,
+        "long_pairings_first": sorted(
+            usable_pairings,
+            key=lambda p: (
+                -len(pairing_fids[p.column_id]), salary_per_flight(p),
+                earliest_start(p), p.column_id,
+            ),
         ),
-    )
-    cost_first = sorted(
-        usable_pairings,
-        key=lambda p: (
-            salary_per_flight(p),
-            -len(pairing_fids[p.column_id]),
-            earliest_start(p),
-            p.column_id,
+        "rare_flights_first": sorted(
+            usable_pairings,
+            key=lambda p: (
+                -sum(1.0 / max(1, candidate_degree[fid]) for fid in pairing_fids[p.column_id]),
+                -len(pairing_fids[p.column_id]), salary_per_flight(p),
+                earliest_start(p), p.column_id,
+            ),
         ),
-    )
+        "cost_per_flight_first": sorted(
+            usable_pairings,
+            key=lambda p: (
+                salary_per_flight(p), -len(pairing_fids[p.column_id]),
+                earliest_start(p), p.column_id,
+            ),
+        ),
+    }
 
-    def construct_plan(ordering_name: str, ordered: Sequence[PairingColumn]) -> dict[str, object]:
+    def construct_plan(
+        ordering_name: str,
+        ordered: Sequence[PairingColumn],
+        assignment_mode: str,
+        retry_passes: int,
+    ) -> dict[str, object]:
         routes: dict[str, list[dict[str, object]]] = {a.tail_id: [] for a in tails}
         covered: set[str] = set()
         assigned: dict[str, str] = {}
         selected: list[str] = []
         total_cost = 0.0
+        pending = list(ordered)
+        passes_used = 0
 
-        for pairing in ordered:
-            fids = pairing_fids[pairing.column_id]
-            if not fids or any(fid in covered for fid in fids):
-                continue
+        for pass_number in range(retry_passes + 1):
+            passes_used = pass_number + 1
+            next_pending: list[PairingColumn] = []
+            progress = False
 
-            # Undo log makes a multi-flight pairing insertion atomic.
-            undo: list[tuple[str, int, str]] = []
-            new_assignments: dict[str, str] = {}
-            feasible = True
-            sequence = sorted(
-                (records[fid] for fid in fids),
-                key=lambda f: (f["STD"], str(f["flight_id"])),
-            )
-            for flight in sequence:
-                options = []
-                for tail in tails:
-                    found = insertion_position(routes[tail.tail_id], flight, tail)
-                    if found is None:
-                        continue
-                    pos, added_gap = found
-                    options.append((added_gap, len(routes[tail.tail_id]), tail.tail_id, pos))
-                if not options:
-                    feasible = False
-                    break
-                _gap, _size, tail_id, pos = min(options, key=lambda x: (x[0], x[1], x[2]))
-                routes[tail_id].insert(pos, flight)
-                undo.append((tail_id, pos, str(flight["flight_id"])))
-                new_assignments[str(flight["flight_id"])] = tail_id
+            for pairing in pending:
+                fids = pairing_fids[pairing.column_id]
+                if not fids:
+                    continue
+                if any(fid in covered for fid in fids):
+                    # This candidate overlaps an already selected pairing, so
+                    # retrying it cannot help.
+                    continue
 
-            if not feasible:
-                for tail_id, pos, fid in reversed(undo):
-                    if pos < len(routes[tail_id]) and str(routes[tail_id][pos]["flight_id"]) == fid:
-                        routes[tail_id].pop(pos)
+                undo: list[tuple[str, int, str]] = []
+                new_assignments: dict[str, str] = {}
+                feasible = True
+                sequence = sorted(
+                    (records[fid] for fid in fids),
+                    key=lambda f: (f["STD"], str(f["flight_id"])),
+                )
+
+                for flight in sequence:
+                    fid = str(flight["flight_id"])
+                    preferred_tail_id = preferred_map.get(fid)
+                    options = []
+                    if assignment_mode == "line_locked":
+                        candidate_tails = (
+                            [tail_by_id[preferred_tail_id]]
+                            if preferred_tail_id in tail_by_id else []
+                        )
+                    elif assignment_mode == "line_preferred" and preferred_tail_id in tail_by_id:
+                        # Fast path: if the original line can take the flight,
+                        # preserve it without scoring all other aircraft. Only
+                        # search alternative tails when the preferred line is blocked.
+                        preferred_found = insertion_position(
+                            routes[preferred_tail_id], flight, tail_by_id[preferred_tail_id]
+                        )
+                        if preferred_found is not None:
+                            preferred_pos, preferred_gap = preferred_found
+                            options = [(0, preferred_gap, len(routes[preferred_tail_id]), preferred_tail_id, preferred_pos)]
+                            candidate_tails = []
+                        else:
+                            candidate_tails = [tail for tail in tails if tail.tail_id != preferred_tail_id]
+                            options = []
                     else:
-                        raise RuntimeError("Greedy pairing rollback invariant failed")
-                continue
+                        candidate_tails = tails
+                        options = []
 
-            assigned.update(new_assignments)
-            covered.update(fids)
-            selected.append(pairing.column_id)
-            total_cost += float(pairing.cost)
+                    for tail in candidate_tails:
+                        found = insertion_position(routes[tail.tail_id], flight, tail)
+                        if found is None:
+                            continue
+                        pos, added_gap = found
+                        preference_penalty = (
+                            0 if tail.tail_id == preferred_tail_id else 1
+                        ) if assignment_mode == "line_preferred" else 0
+                        options.append((
+                            preference_penalty, added_gap,
+                            len(routes[tail.tail_id]), tail.tail_id, pos,
+                        ))
+
+                    if not options:
+                        feasible = False
+                        break
+
+                    _pref, _gap, _size, tail_id, pos = min(
+                        options, key=lambda x: (x[0], x[1], x[2], x[3])
+                    )
+                    routes[tail_id].insert(pos, flight)
+                    undo.append((tail_id, pos, fid))
+                    new_assignments[fid] = tail_id
+
+                if not feasible:
+                    for tail_id, pos, fid in reversed(undo):
+                        if pos < len(routes[tail_id]) and str(routes[tail_id][pos]["flight_id"]) == fid:
+                            routes[tail_id].pop(pos)
+                        else:
+                            raise RuntimeError("Greedy pairing rollback invariant failed")
+                    next_pending.append(pairing)
+                    continue
+
+                assigned.update(new_assignments)
+                covered.update(fids)
+                selected.append(pairing.column_id)
+                total_cost += float(pairing.cost)
+                progress = True
+
+            pending = next_pending
+            if not pending or not progress:
+                break
 
         used_tails = {assigned[fid] for fid in assigned}
         total_cost += sum(float(tail_by_id[tid].start_cost) for tid in used_tails)
+        same_preferred_line = sum(
+            1 for fid, tail_id in assigned.items()
+            if fid in preferred_map and preferred_map[fid] == tail_id
+        )
         return {
+            "name": f"{assignment_mode}_{'single_pass' if retry_passes == 0 else 'retry'}__{ordering_name}",
             "ordering": ordering_name,
+            "assignment_mode": assignment_mode,
             "covered": covered,
             "assigned": assigned,
             "selected": selected,
             "total_cost": total_cost,
+            "passes_used": passes_used,
+            "same_preferred_line_operated": same_preferred_line,
+            "moved_from_preferred_line_operated": len(assigned) - same_preferred_line,
+            "unresolved_pairings_after_retries": len(pending),
         }
 
-    # The long-column order is the prior single-pass baseline. Compare it with two
-    # alternatives on identical inputs, and report the actual operated-flight delta.
-    orderings = (
-        ("long_pairings_first", long_first),
-        ("rare_flights_first", scarcity_first),
-        ("cost_per_flight_first", cost_first),
+    plans: list[dict[str, object]] = []
+    # Keep the previous three one-pass strategies as exact comparators.
+    historical_ordering_names = (
+        "long_pairings_first", "rare_flights_first", "cost_per_flight_first"
     )
-    plans = [construct_plan(name, ordering) for name, ordering in orderings]
+    for ordering_name in historical_ordering_names:
+        plans.append(construct_plan(
+            ordering_name, orderings[ordering_name], "free", retry_passes=0
+        ))
+
+    # Retry under the two orders most useful for repair: chronological order
+    # builds predecessor routes first; cost-per-flight preserves the prior best
+    # coverage result as an additional reference.
+    retry_ordering_names = ("chronological_first", "cost_per_flight_first")
+    for ordering_name in retry_ordering_names:
+        ordering = orderings[ordering_name]
+        plans.append(construct_plan(
+            ordering_name, ordering, "free", retry_passes=max_retry_passes
+        ))
+        if preferred_map:
+            plans.append(construct_plan(
+                ordering_name, ordering, "line_preferred", retry_passes=max_retry_passes
+            ))
+
+    # A strict same-line plan is the cleanest diagnostic for whether the existing
+    # supplied line baseline can carry the candidate pool without reconstruction.
+    if has_complete_line_map:
+        plans.append(construct_plan(
+            "chronological_first", orderings["chronological_first"],
+            "line_locked", retry_passes=max_retry_passes
+        ))
+
     best = min(
         plans,
         key=lambda plan: (
@@ -565,34 +675,45 @@ def solve_joint_operate_cancel_greedy(
     assigned = best["assigned"]
     selected = best["selected"]
     cancelled = tuple(sorted(set(records) - covered))
-    baseline = next(plan for plan in plans if plan["ordering"] == "long_pairings_first")
+
+    old_baseline = next(
+        plan for plan in plans
+        if plan["assignment_mode"] == "free"
+        and plan["ordering"] == "long_pairings_first"
+        and plan["passes_used"] == 1
+    )
     plan_comparison = {
-        str(plan["ordering"]): {
+        str(plan["name"]): {
             "operated_flights": len(plan["covered"]),
             "cancelled_flights": len(records) - len(plan["covered"]),
             "secondary_objective": float(plan["total_cost"]),
+            "assignment_mode": str(plan["assignment_mode"]),
+            "pairing_order": str(plan["ordering"]),
+            "passes_used": int(plan["passes_used"]),
+            "same_preferred_line_operated": int(plan["same_preferred_line_operated"]),
+            "moved_from_preferred_line_operated": int(plan["moved_from_preferred_line_operated"]),
+            "unresolved_pairings_after_retries": int(plan["unresolved_pairings_after_retries"]),
         }
         for plan in plans
     }
-    coverage_gain = len(covered) - len(baseline["covered"])
+    coverage_gain = len(covered) - len(old_baseline["covered"])
     heuristic_diagnostics = {
-        "ordering_strategies_evaluated": len(plans),
-        "single_order_baseline": plan_comparison["long_pairings_first"],
-        "best_of_three": {
-            "ordering": str(best["ordering"]),
-            "operated_flights": len(covered),
-            "cancelled_flights": len(cancelled),
-            "secondary_objective": float(best["total_cost"]),
-        },
-        "operated_flights_gain_vs_single_order_baseline": coverage_gain,
-        "coverage_percentage_point_gain_vs_single_order_baseline": round(
+        "plans_evaluated": len(plans),
+        "single_pass_baseline": plan_comparison[old_baseline["name"]],
+        "best_plan": plan_comparison[str(best["name"])],
+        "operated_flights_gain_vs_single_pass_baseline": coverage_gain,
+        "coverage_percentage_point_gain_vs_single_pass_baseline": round(
             100.0 * coverage_gain / max(1, len(records)), 2
         ),
+        "preferred_aircraft_line_map_complete": bool(has_complete_line_map),
+        "preferred_aircraft_line_map_flights": int(len(preferred_map)),
         "evaluated_plans": plan_comparison,
         "comparison_note": (
-            "Same flight set, pairing candidate pool and aircraft inventory; the single-order "
-            "baseline is the previous long-column-first greedy ordering. Cost is only used "
-            "after operated-flight count when selecting best_of_three."
+            "The single-pass baseline and new retry/line-preservation strategies use the same "
+            "flight set, pairing candidate pool and aircraft inventory. All plans are independently "
+            "checked by the runner's post-solve aircraft and crew coverage validators. The line-locked "
+            "variant is only a diagnostic when provisional AIRFLITE line IDs are used; those IDs are "
+            "not verified physical tail registrations."
         ),
     }
 
@@ -602,10 +723,6 @@ def solve_joint_operate_cancel_greedy(
         if not candidates:
             reasons[fid] = "NO_VALID_PAIRING_CANDIDATE"
             continue
-        # If every available column contains another flight selected for
-        # operation, the chosen plan blocks these alternatives through pairing
-        # overlap. Otherwise the remaining non-overlapping options failed the
-        # hard aircraft route/start/equipment checks in the heuristic.
         all_blocked_by_overlap = all(
             any(other != fid and other in covered for other in pairing_fids[p.column_id])
             for p in candidates
@@ -623,11 +740,9 @@ def solve_joint_operate_cancel_greedy(
         cancellation_count=len(cancelled),
         secondary_objective=float(best["total_cost"]),
         solver_message=(
-            "Coverage-first deterministic greedy multi-start heuristic (long-column, "
-            "rare-flight, and cost-per-flight orders); maximum operated-flight count "
-            "among these plans selected, then pairing plus aircraft-start cost. Not "
-            "proven globally optimal; restricted to supplied pairing columns and "
-            "provisional aircraft resources. Hard feasibility constraints were not relaxed."
+            f"Best of {len(plans)} deterministic feasible heuristic plans: "
+            f"{best['name']}; operates {len(covered)}/{len(records)} flights. "
+            "Hard route feasibility constraints are unchanged; no global optimum is claimed."
         ),
         optimal_over_supplied_columns=False,
         minimum_cancellation_count_proven=False,

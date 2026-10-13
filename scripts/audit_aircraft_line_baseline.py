@@ -68,16 +68,7 @@ def main() -> int:
         "source": "originals/low_kgp reconciled to input/schedule.xlsx and originals/MGT.xlsx",
         "prepared_schedule_flights": int(len(prepared)),
         "line_assignment_reconciliation": "PASS",
-        "unresolved_mgt_flights_in_scope": int(
-            prepared.loc[
-                pd.to_datetime(prepared["Day"]).dt.normalize().between(
-                    pd.Timestamp(args.start_date), pd.Timestamp(args.end_date)
-                ),
-                "mgt_status",
-            ].astype(str).str.contains(
-                "_CONFLICT|MISSING|OUT_OF_EFFECTIVE_DATE", regex=True
-            ).sum()
-        ),
+        "unresolved_mgt_flights_in_scope": int(summary.get("unresolved_mgt_flight_count", 0)),
         **summary,
     }
     transitions.to_csv(args.output_dir / "aircraft_line_baseline_transitions.csv", index=False)

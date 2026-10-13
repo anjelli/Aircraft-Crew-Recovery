@@ -67,7 +67,7 @@ def main() -> int:
             "hard crew/MGT, equipment, aircraft start-state, station-continuity, and route constraints",
             "maximize operated flights (equivalently minimize cancellations) before any cost trade-off",
             "then minimize supplied pairing salary plus aircraft start cost",
-            "large-horizon heuristic compares long-column, rare-flight, and cost-per-flight orders; selects maximum coverage, then lower cost",
+            "large-horizon heuristic compares the prior single-pass plans with chronological and cost-first retry plans, plus line-preferred and line-locked plans when provisional line assignments map; selects maximum coverage, then lower cost",
         ],
         "not_integrated": [
             "flight-copy retiming selection",
@@ -106,8 +106,9 @@ def main() -> int:
         ],
         "interpretation": (
             "1W uses the joint MILP when its input size is small. Month/full horizons use a "
-            "coverage-first deterministic multi-start heuristic that compares three pairing orders. "
-            "The default existing-only mode uses validated supplied pairing columns; --pairing-mode "
+            "coverage-first heuristic that compares single-pass, chronological retry, and (when available) "
+            "AIRFLITE line-preserving assignment variants. The default existing-only mode uses validated "
+            "supplied pairing columns; --pairing-mode "
             "expanded additionally runs the declared-domain pairing generator and may be expensive "
             "on long horizons. Reason codes describe the selected restricted plan, not global "
             "infeasibility. LINE_n resources are provisional. Flights with unresolved MGT are "

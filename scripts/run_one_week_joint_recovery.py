@@ -181,6 +181,39 @@ def main() -> int:
                 "detail": "No aircraft_inventory.csv found. LINE_n resources are only provisional line-of-work proxies; the solve is a research baseline, not an operational tail assignment.",
             })
 
+        preferred_aircraft_by_flight = None
+        if summary["aircraft_resources_are_provisional"]:
+            known_tail_ids = {a.tail_id for a in aircraft}
+            candidate_line_map = {
+                str(row["flight_id"]): str(row["provisional_aircraft_id"])
+                for _, row in line_assignments.iterrows()
+                if str(row["provisional_aircraft_id"]) in known_tail_ids
+            }
+            active_ids_for_line_map = set(active["flight_id"].astype(str))
+            preferred_aircraft_by_flight = {
+                fid: candidate_line_map[fid]
+                for fid in active_ids_for_line_map
+                if fid in candidate_line_map
+            }
+            if len(preferred_aircraft_by_flight) != len(active_ids_for_line_map):
+                summary["blockers"].append({
+                    "code": "INCOMPLETE_PROVISIONAL_LINE_PREFERENCE_MAP",
+                    "detail": (
+                        f"Only {len(preferred_aircraft_by_flight)} of {len(active_ids_for_line_map)} "
+                        "optimization-eligible flights could be mapped to a provisional AIRFLITE line; "
+                        "line-preserving heuristic plans will be incomplete."
+                    ),
+                })
+            summary["aircraft_line_preference"] = (
+                "Provisional AIRFLITE line assignments will be evaluated as a preference and as a "
+                "strict diagnostic variant; they are not verified tail IDs."
+            )
+        else:
+            summary["aircraft_line_preference"] = (
+                "Not used because verified registered aircraft inventory is loaded; AIRFLITE LINE_n IDs "
+                "are not treated as registered aircraft."
+            )
+
         report = pd.read_excel(input_file("pairing_report.xlsx"))
         costs = load_cost_parameters(original_file("cost_parameters.csv"))
         man_day_cost = costs["man_day_cost"]
@@ -292,7 +325,12 @@ def main() -> int:
         # incumbent; use the explicit deterministic feasibility heuristic instead.
         solver_mode = "joint_milp"
         if len(active) > 1500:
-            result = solve_joint_operate_cancel_greedy(mgt_flights, candidate_columns, aircraft)
+            result = solve_joint_operate_cancel_greedy(
+                mgt_flights,
+                candidate_columns,
+                aircraft,
+                preferred_aircraft_by_flight=preferred_aircraft_by_flight,
+            )
             solver_mode = "deterministic_greedy_large_horizon"
         else:
             try:
@@ -303,7 +341,12 @@ def main() -> int:
             except RuntimeError as solve_error:
                 if "no feasible incumbent" not in str(solve_error).lower():
                     raise
-                result = solve_joint_operate_cancel_greedy(mgt_flights, candidate_columns, aircraft)
+                result = solve_joint_operate_cancel_greedy(
+                    mgt_flights,
+                    candidate_columns,
+                    aircraft,
+                    preferred_aircraft_by_flight=preferred_aircraft_by_flight,
+                )
                 solver_mode = "deterministic_greedy_no_incumbent_fallback"
         selected_pairings = set(result.selected_pairing_ids)
         selected_map = {}
