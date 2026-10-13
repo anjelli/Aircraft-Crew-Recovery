@@ -109,13 +109,14 @@ def main() -> int:
             raise ValueError("No active flights found for requested one-week window")
         if active["flight_id"].duplicated().any():
             raise ValueError("Active schedule contains duplicate flight IDs")
-        missing_mgt = active[active["mgt_min"].isna()][["flight_id", "Flt Num", "From", "To", "Eqp", "STA_local", "mgt_status"]]
+        bad_mgt_mask = active["mgt_min"].isna() | active["mgt_status"].astype(str).str.contains("_CONFLICT", regex=False)
+        missing_mgt = active.loc[bad_mgt_mask, ["flight_id", "Flt Num", "From", "To", "Eqp", "STA_local", "mgt_status"]]
         if not missing_mgt.empty:
             missing_mgt.to_csv(out / "missing_mgt_rules.csv", index=False)
             summary["blockers"].append({
                 "code": "MGT_RULE_MISSING",
                 "count": int(len(missing_mgt)),
-                "detail": "At least one active flight has no resolved arrival-station/equipment MGT. The solver was not run with fabricated turnaround values.",
+                "detail": "At least one active flight has missing or conflicting arrival-station/equipment MGT. The solver was not run with fabricated or ambiguous turnaround values.",
             })
             summary["active_flights"] = int(len(active))
             summary["missing_mgt_count"] = int(len(missing_mgt))
