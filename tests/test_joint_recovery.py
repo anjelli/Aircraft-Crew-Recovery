@@ -111,6 +111,13 @@ def test_greedy_fallback_returns_a_feasible_nonoptimal_plan():
     assert set(result.selected_pairing_ids) == {"P12", "P3"}
     assert result.optimal_over_supplied_columns is False
     assert result.minimum_cancellation_count_proven is False
+    comparison = result.heuristic_diagnostics
+    assert comparison["ordering_strategies_evaluated"] == 3
+    assert comparison["best_of_three"]["operated_flights"] == 3
+    assert comparison["operated_flights_gain_vs_single_order_baseline"] >= 0
+    assert comparison["best_of_three"]["operated_flights"] == max(
+        plan["operated_flights"] for plan in comparison["evaluated_plans"].values()
+    )
 
 
 def test_greedy_fallback_does_not_claim_incompatible_flight_is_operated():
