@@ -389,7 +389,7 @@ def main() -> int:
             summary["status"] = "PROTOTYPE_OPTIMAL_WITH_PROVISIONAL_TAILS"
         if solver_mode.startswith("deterministic_greedy"):
             summary["status"] = "HEURISTIC_FEASIBLE_NOT_OPTIMAL"
-        if not missing_mgt.empty:
+        if not missing_mgt.empty and summary["status"] != "BLOCKED_POST_SOLVE_VALIDATION_FAILED":
             summary["status_before_unresolved_mgt"] = summary["status"]
             summary["status"] = "PARTIAL_RECOVERY_UNRESOLVED_MGT"
         summary.update({
