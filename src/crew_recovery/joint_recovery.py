@@ -277,13 +277,13 @@ def solve_joint_operate_cancel(
         )
 
     selected = tuple(columns[p].column_id for p in range(n_p) if solution[x0 + p] > 0.5)
-    cancelled = tuple(ids[i] for i in range(n_f) if second.x[cancel0 + i] > 0.5)
+    cancelled = tuple(ids[i] for i in range(n_f) if solution[cancel0 + i] > 0.5)
     selected_source = {
-        key: var for key, var in source_index.items() if second.x[var] > 0.5
+        key: var for key, var in source_index.items() if solution[var] > 0.5
     }
     selected_next = {}
     for k, (c, i, j) in enumerate(arcs):
-        if second.x[arc_var[k]] > 0.5:
+        if solution[arc_var[k]] > 0.5:
             if i in selected_next:
                 raise RuntimeError(f"Internal solution audit: multiple successors for flight {ids[i]!r}")
             selected_next[i] = j
@@ -304,6 +304,14 @@ def solve_joint_operate_cancel(
             current = next_i
 
     operated = set(ids) - set(cancelled)
+    pairing_cover = {fid: 0 for fid in ids}
+    for p in columns:
+        if p.column_id in selected:
+            for fid in p.flight_ids:
+                pairing_cover[fid] += 1
+    bad_cover = [fid for fid in ids if pairing_cover[fid] != (0 if fid in cancelled else 1)]
+    if bad_cover:
+        raise RuntimeError(f"Internal solution audit: selected pairing cover is invalid for {bad_cover[:10]}")
     if set(aircraft_by_flight) != operated:
         raise RuntimeError(
             "Internal solution audit: aircraft path decomposition differs from operated flights "
