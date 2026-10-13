@@ -100,6 +100,7 @@ def main() -> int:
                 "operational_acceptance": r.get("operational_acceptance", False),
                 "blockers": r.get("blockers", []),
                 "unoperated_reason_counts_including_unresolved": r.get("unoperated_reason_counts_including_unresolved", {}),
+                "heuristic_plan_comparison": r.get("heuristic_plan_comparison", {}),
             }
             for r in results
         ],
