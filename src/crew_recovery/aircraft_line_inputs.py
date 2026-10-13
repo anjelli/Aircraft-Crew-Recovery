@@ -100,7 +100,7 @@ def load_aircraft_line_inventory(
     schedule["STA"] = pd.to_datetime(schedule["STA"], errors="coerce")
     schedule["route_STD"] = pd.to_datetime(schedule["STD_sin"], errors="coerce") if "STD_sin" in schedule else schedule["STD"]
     schedule["route_STA"] = pd.to_datetime(schedule["STA_sin"], errors="coerce") if "STA_sin" in schedule else schedule["STA"]
-    schedule["Flt Num" = pd.to_numeric(schedule["Flt Num"], errors="coerce")
+    schedule["Flt Num"] = pd.to_numeric(schedule["Flt Num"], errors="coerce")
     schedule["Eqp"] = schedule["Eqp"].astype(str).str.strip()
     schedule = schedule.loc[
         schedule["STD"].notna()
