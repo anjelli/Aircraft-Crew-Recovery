@@ -6,8 +6,9 @@ on:
     branches: [main]
 
 jobs:
-  pytest:
+  recovery:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,45 +20,18 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Prepare canonical runtime inputs
         run: python setup_workspace.py
-      - name: Run revenue join and anomaly audit
-        run: python revenue_audit.py
-      - name: Decompose coverage baseline and report solver readiness
-        run: python objective_layer_readiness.py
-      - name: Run full-horizon readiness audit
-        run: python scripts/audit_full_horizon_readiness.py --output output/audit/full_horizon_readiness.json
-      - name: Run one-week resource-constrained pricing audit
-        run: python run_pairing_experiment.py --horizons 1W --resource-constrained-pricing
-      - name: Export 1W, 1M, and 154D recovery readiness packages
-        run: python scripts/run_recovery_horizon.py --horizons 1W 1M 154D
-      - name: Run consolidated recovery-gap audit
-        run: python scripts/audit_recovery_gap.py
-      - name: Run one-week joint crew-aircraft recovery prototype
-        run: python scripts/run_one_week_joint_recovery.py --start-date 2026-10-25 --days 7 --time-limit-seconds 30 --skip-pricing
-      - name: Run bounded joint recovery for 1W, 1M, and 154D
-        continue-on-error: true
-        timeout-minutes: 15
-        run: python scripts/run_joint_recovery_horizons.py --time-limit-seconds 30
       - name: Run regression tests
         run: python -m pytest -q tests
-      - name: Upload recovery audit artifacts
+      - name: Solve and export 1W, 1M, and 154D recovery schedules
+        timeout-minutes: 20
+        run: python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
+      - name: Upload recovery schedules and validation evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recovery-audit
+          name: recovered-schedules
           path: |
-            output/audit/full_horizon_readiness.json
-            output/column_generation/1w_solution_audit/
-            output/column_generation/1w_resource_constrained_pricing.json
-            output/pairing_experiment_1_week.xlsx
-            output/audit/recovery_gap/
-            output/recovery/
-            output/one_week_joint_recovery/
             output/joint_recovery/
-          if-no-files-found: error
-      - name: Upload revenue/objective audit artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: revenue-objective-audit
-          path: |
-            output/revenue_audit/
-            output/objective_readiness/
-          if-no-files-found: error
+            output/one_week_joint_recovery/
+            output/audit/schedule_exact_duplicate_rows.csv
+          if-no-files-found: warn

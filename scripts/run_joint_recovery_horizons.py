@@ -20,7 +20,7 @@ HORIZONS = (("1W", 7), ("1M", 31), ("154D", 154))
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--time-limit-seconds", type=float, default=120.0)
+    parser.add_argument("--time-limit-seconds", type=float, default=180.0, help="MILP time limit per pass; longer horizons need more than the CI smoke-test limit.")
     parser.add_argument("--output-root", type=Path, default=ROOT / "output" / "joint_recovery")
     parser.add_argument("--horizons", nargs="+", choices=[h[0] for h in HORIZONS], default=["1W", "1M", "154D"])
     args = parser.parse_args()
@@ -72,9 +72,13 @@ def main() -> int:
                 "horizon": r.get("horizon_label"),
                 "status": r.get("status"),
                 "active_flights": r.get("active_flights"),
+                "optimization_eligible_flights": r.get("optimization_eligible_flights"),
+                "unresolved_mgt_flights": r.get("unresolved_mgt_flights", 0),
                 "operated_flights": r.get("operated_flights"),
                 "cancelled_flights": r.get("cancelled_flights"),
                 "uncovered_or_cancelled_flights": r.get("cancelled_flights"),
+                "solver_mode": r.get("solver_mode"),
+                "operated_coverage_pct_of_all_flights": r.get("operated_coverage_pct_of_all_flights"),
                 "flights_without_existing_pairing_candidate": r.get("flights_without_existing_pairing_candidate"),
                 "operated_coverage_pct": (
                     round(100.0 * r.get("operated_flights", 0) / r["active_flights"], 2)
@@ -90,9 +94,12 @@ def main() -> int:
             for r in results
         ],
         "interpretation": (
-            "Decision-level schedules are candidate-pool limited. Cancelled flights are "
-            "not proven infeasible; some may lack a supplied pairing column. LINE_n aircraft "
-            "resources are provisional, and retiming is not optimized."
+            "1W uses the joint MILP when its input size is small. Month/full horizons use a "
+            "deterministic feasible heuristic to avoid returning no schedule after a MILP timeout. "
+            "All runs use only independently validated supplied pairing columns in this bounded "
+            "runner; cancelled flights are not proven globally infeasible, and LINE_n resources "
+            "are provisional. Flights with unresolved MGT are reported separately, not counted "
+            "as cancellations. Retiming is not optimized."
         ),
     }
     (args.output_root / "horizon_summary.json").write_text(json.dumps(aggregate, indent=2) + "\n", encoding="utf-8")
