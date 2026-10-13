@@ -204,6 +204,8 @@ def main() -> int:
                 candidate_degree[fid] = candidate_degree.get(fid, 0) + 1
         # Price uncovered/fragile flights first; this keeps the generated pool
         # focused instead of materializing every legal pairing in the week.
+        uncovered_before_pricing = sum(degree == 0 for degree in candidate_degree.values())
+        single_option_before_pricing = sum(degree == 1 for degree in candidate_degree.values())
         dual_prices = {
             fid: (1000.0 if degree == 0 else 0.1 if degree == 1 else 0.0)
             for fid, degree in candidate_degree.items()
@@ -297,7 +299,12 @@ def main() -> int:
         summary.update({
             "active_flights": int(len(active)),
             "existing_valid_pairing_candidates": int(existing_valid_count),
+            "flights_without_existing_pairing_candidate": int(uncovered_before_pricing),
+            "flights_with_one_existing_pairing_candidate": int(single_option_before_pricing),
             "generated_pairing_candidates": int(generated_count),
+            "pricing_explored_states": int(priced_batch.explored_states),
+            "pricing_domain_status": str(priced_batch.status),
+            "pricing_best_reduced_cost": priced_batch.best_reduced_cost,
             "duplicate_generated_pairings_skipped": int(duplicate_generated),
             "validated_pairing_candidates": int(len(candidate_columns)),
             "invalid_pairing_candidates_in_status_report": int((statuses["Status"] == "INVALID").sum()),
