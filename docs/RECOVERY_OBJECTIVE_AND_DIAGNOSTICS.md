@@ -47,7 +47,7 @@ These are explanations of the selected restricted plan. They are not certificate
 The horizon runner defaults to the bounded `existing-only` mode, using validated pairing-report columns. To try additional legal candidates within the project's declared duty domain, run one horizon at a time:
 
 ```bash
-python scripts/run_joint_recovery_horizons.py --horizons 1W --pairing-mode expanded --time-limit-seconds 180
+python scripts/run_joint_recovery_horizons.py --horizons 1W --pairing-mode expanded --output-root output/joint_recovery_expanded --time-limit-seconds 180
 ```
 
 The generator validates candidates independently, but its declared domain is not guaranteed to contain every operationally legal pairing. Candidate generation can become expensive on month/full horizons; benchmark 1W first before expanding the horizon. The default full-horizon run remains bounded.
