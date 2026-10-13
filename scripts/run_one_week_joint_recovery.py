@@ -33,6 +33,8 @@ from crew_recovery.independent_validator import (
     validate_existing,
 )
 from crew_recovery.resource_constrained_pricing import ResourceConstrainedPairingPricer
+from crew_recovery.crew_costing import crew_salary_cost, generated_pairing_cost_callback
+from crew_recovery.objective_spec import load_cost_parameters
 from crew_recovery.joint_recovery import solve_joint_operate_cancel
 
 
@@ -111,6 +113,8 @@ def main() -> int:
         "status": "BLOCKED_NOT_OPTIMIZED",
         "equipment_in_scope": ["320", "32N", "32P", "32Q"],
         "retiming_supported": False,
+        "objective_policy": ["minimize_cancellations", "minimize_midnight_aware_crew_salary_plus_aircraft_start_cost"],
+        "objective_cost_basis": "Crew salary uses cost_parameters.csv man_day_cost multiplied by each duty calendar day touched, including the second day when duty crosses midnight; other allowances and retiming are not yet integrated.",
         "aircraft_resources_are_provisional": True,
         "optimality_scope": "Only independently validated existing/generated pairing columns and generated aircraft route arcs.",
         "blockers": [],
@@ -145,6 +149,8 @@ def main() -> int:
         line_assignments.to_csv(out / "provisional_line_inventory.csv", index=False)
 
         report = pd.read_excel(ROOT / "pairing_report.xlsx")
+        costs = load_cost_parameters(ROOT / "cost_parameters.csv")
+        man_day_cost = costs["man_day_cost"]
         rules = Rules(fdp=load_fdp(ROOT / "fdp_rules.csv"), dsb=60, feb=0, deb=30, max_layover_h=72.0)
         statuses, violations, unmatched, skipped = validate_existing(
             report, prepared, rules, start=start, end=end
@@ -169,7 +175,10 @@ def main() -> int:
             col = PairingColumn(
                 column_id=f"PAIR_{pid}",
                 flight_ids=flight_ids,
-                cost=1.0,
+                cost=crew_salary_cost(
+                    group.to_dict("records"), splits, man_day_cost=man_day_cost,
+                    duty_start_buffer_minutes=rules.dsb, duty_end_buffer_minutes=rules.deb,
+                ),
                 pairing_type="independently_validated_existing_report",
                 is_multi_day=len(splits) > 1,
                 num_duties=len(splits),
@@ -202,6 +211,11 @@ def main() -> int:
             layover_stations=_derive_layover_stations(report, "SIN"),
             validator=validate_generated,
             pairing_cost=1.0,
+            pairing_cost_fn=generated_pairing_cost_callback(
+                man_day_cost=man_day_cost,
+                duty_start_buffer_minutes=rules.dsb,
+                duty_end_buffer_minutes=rules.deb,
+            ),
             hub="SIN",
             max_sectors_per_duty=4,
             max_duties=3,
@@ -314,6 +328,7 @@ def main() -> int:
             "crew_coverage_errors": crew_coverage_errors,
             "solver_message": result.solver_message,
             "secondary_objective": result.secondary_objective,
+            "crew_salary_cost_basis": "man_day_cost per duty calendar day; crossing midnight counts both calendar dates",
             "minimum_cancellation_count_proven": result.minimum_cancellation_count_proven,
             "full_lexicographic_optimum_proven": result.optimal_over_supplied_columns,
             "assumptions": [
