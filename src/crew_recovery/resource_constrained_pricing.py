@@ -235,6 +235,11 @@ class ResourceConstrainedPairingPricer:
                     if col is not None:
                         yield col
 
+    @property
+    def states_explored(self) -> int:
+        """Number of partial duty paths visited by the current enumerator."""
+        return self._states_explored
+
     def generate_candidates(self) -> tuple[PairingColumn, ...]:
         """Enumerate all independently validated columns in the declared pairing domain.
 
