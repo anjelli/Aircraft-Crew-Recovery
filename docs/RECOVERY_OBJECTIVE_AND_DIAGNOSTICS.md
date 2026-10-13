@@ -7,7 +7,9 @@ The current one-week joint MILP already applies a lexicographic objective:
 1. Minimize the number of cancellations.
 2. Fix the minimum cancellation count found by the first pass, then minimize supplied pairing salary plus aircraft-start cost.
 
-The long-horizon fallback cannot prove a global optimum. It now constructs three deterministic candidate-selection plans using different pairing orders:
+The long-horizon fallback cannot prove a global optimum. It compares the prior single-pass plans with chronological ordering, bounded retries for pairings rejected before prerequisite route legs were inserted, and (where the provisional AIRFLITE mapping matches the resources) line-preferred and line-locked plans. The summary reports coverage and the number of operated flights that remain on their original provisional line.
+
+The pairing orders include:
 
 - **Long columns first:** favor pairings covering more flights, then lower cost per covered flight.
 - **Rare-flight columns first:** favor pairing columns that cover flights with fewer alternatives in the current candidate pool.
