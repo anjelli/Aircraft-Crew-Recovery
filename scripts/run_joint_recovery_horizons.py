@@ -20,7 +20,7 @@ HORIZONS = (("1W", 7), ("1M", 31), ("154D", 154))
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--time-limit-seconds", type=float, default=120.0)
+    parser.add_argument("--time-limit-seconds", type=float, default=180.0, help="MILP time limit per pass; longer horizons need more than the CI smoke-test limit.")
     parser.add_argument("--output-root", type=Path, default=ROOT / "output" / "joint_recovery")
     parser.add_argument("--horizons", nargs="+", choices=[h[0] for h in HORIZONS], default=["1W", "1M", "154D"])
     args = parser.parse_args()
