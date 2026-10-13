@@ -313,10 +313,38 @@ def main() -> int:
                     raise RuntimeError(f"Two selected pairings cover flight {fid!r}")
                 selected_map[fid] = pid
         cancelled = set(result.cancelled_flights)
+        candidate_pairings_by_flight = {str(fid): [] for fid in active["flight_id"]}
+        for column in candidate_columns:
+            for candidate_fid in column.flight_ids:
+                candidate_pairings_by_flight.setdefault(str(candidate_fid), []).append(column)
         decision_rows = []
         active_records = active.set_index("flight_id").to_dict("index")
         for fid in active["flight_id"]:
-            is_cancelled = fid in cancelled
+            fid_key = str(fid)
+            is_cancelled = fid_key in cancelled
+            candidate_count = len(candidate_pairings_by_flight.get(fid_key, []))
+            reason_code = None
+            reason_text = None
+            if is_cancelled:
+                reason_code = result.cancellation_reasons.get(fid_key)
+                if not reason_code:
+                    if candidate_count == 0:
+                        reason_code = "NO_VALID_PAIRING_CANDIDATE"
+                    elif solver_mode.startswith("deterministic_greedy"):
+                        reason_code = "NOT_CLASSIFIED_BY_HEURISTIC"
+                    else:
+                        reason_code = "NOT_SELECTED_BY_JOINT_MILP"
+                reason_text_by_code = {
+                    "NO_VALID_PAIRING_CANDIDATE": "No validated pairing candidate in the current candidate pool contains this flight.",
+                    "PAIRING_OVERLAP_WITH_SELECTED_PAIRING": "Every available pairing containing this flight overlaps at least one flight selected by the current recovery plan.",
+                    "NO_FEASIBLE_AIRCRAFT_ROUTE_FOR_AVAILABLE_PAIRING": "The available non-overlapping pairing option(s) could not be inserted into the aircraft routes while respecting hard start-state, equipment, station-continuity and MGT constraints.",
+                    "NOT_SELECTED_BY_JOINT_MILP": "A validated pairing candidate contains this flight, but the joint MILP did not select it under the current candidate and aircraft constraints; this is not proof of global infeasibility.",
+                    "NOT_CLASSIFIED_BY_HEURISTIC": "The heuristic did not select this flight; inspect the candidate and aircraft feasibility reports. This is not proof of global infeasibility.",
+                }
+                reason_text = reason_text_by_code.get(
+                    reason_code,
+                    "The flight was not selected by the current restricted recovery model; this is not proof of operational infeasibility.",
+                )
             decision_rows.append({
                 "flight_id": fid,
                 "service_date": pd.Timestamp(active_records[fid]["Day"]).date().isoformat(),
@@ -329,9 +357,11 @@ def main() -> int:
                 "recovered_STD_local": None if is_cancelled else str(active_records[fid]["STD_local"]),
                 "recovered_STA_local": None if is_cancelled else str(active_records[fid]["STA_local"]),
                 "recovery_action": "CANCEL" if is_cancelled else "OPERATE",
-                "cancellation_reason": ("Not selected by the deterministic heuristic from the supplied validated pairing pool; not proof of operational infeasibility." if solver_mode.startswith("deterministic_greedy") else "Selected by the joint operate/cancel MILP; inspect pairing and aircraft feasibility audits.") if is_cancelled else None,
-                "assigned_pairing_id": None if is_cancelled else selected_map.get(fid),
-                "assigned_aircraft_tail": None if is_cancelled else result.aircraft_by_flight.get(fid),
+                "cancellation_reason_code": reason_code,
+                "cancellation_reason": reason_text,
+                "candidate_pairing_count": candidate_count,
+                "assigned_pairing_id": None if is_cancelled else selected_map.get(fid_key),
+                "assigned_aircraft_tail": None if is_cancelled else result.aircraft_by_flight.get(fid_key),
                 "retime_minutes": 0,
             })
         decisions = pd.DataFrame(decision_rows)
@@ -349,7 +379,9 @@ def main() -> int:
                     "original_STA_local": str(row["STA_local"]),
                     "recovered_STD_local": None, "recovered_STA_local": None,
                     "recovery_action": "UNRESOLVED_MGT",
+                    "cancellation_reason_code": "MGT_RULE_UNRESOLVED",
                     "cancellation_reason": "No unambiguous applicable MGT rule; requires data-owner resolution.",
+                    "candidate_pairing_count": None,
                     "assigned_pairing_id": None, "assigned_aircraft_tail": None,
                     "retime_minutes": None,
                 })
@@ -441,6 +473,20 @@ def main() -> int:
                 "Optimality is restricted to existing pairing-report columns independently marked VALID and the generated aircraft route arcs.",
             ],
         })
+        reason_counts = decisions.loc[
+            decisions["recovery_action"] != "OPERATE", "cancellation_reason_code"
+        ].fillna("UNKNOWN").value_counts()
+        summary["unoperated_reason_counts_including_unresolved"] = {
+            str(code): int(count) for code, count in reason_counts.items()
+        }
+        summary["coverage_first_heuristic"] = (
+            "For long horizons, three deterministic pairing orders are evaluated; maximize operated flights first, then minimize pairing plus aircraft-start cost among those plans."
+            if solver_mode.startswith("deterministic_greedy") else
+            "The joint MILP first minimizes cancellation count, fixes that count, then minimizes supplied pairing salary plus aircraft start cost."
+        )
+        summary["cancellation_reason_semantics"] = (
+            "Reason codes diagnose why the selected restricted plan left a flight out; they are not proofs of global operational infeasibility. MGT_RULE_UNRESOLVED is a data blocker, not a cancellation."
+        )
         decisions.to_csv(out / "flight_decisions.csv", index=False)
         pairing_output.to_csv(out / "selected_pairings.csv", index=False)
         rotations.to_csv(out / "aircraft_rotations.csv", index=False)
