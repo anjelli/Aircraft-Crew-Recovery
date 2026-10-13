@@ -53,7 +53,7 @@ def _canonical_schedule(path: Path) -> pd.DataFrame:
 def _independent_aircraft_check(decisions: pd.DataFrame, flights: pd.DataFrame, aircraft) -> list[dict]:
     violations = []
     resource = {a.tail_id: a for a in aircraft}
-    lookup = flights.set_index("flight_id").to_dict("index")
+    lookup = {str(row["flight_id"]): row for row in flights.to_dict("records")}
     operated = decisions[decisions["recovery_action"] == "OPERATE"]
     for tail_id, group in operated.groupby("assigned_aircraft_tail"):
         tail = resource[tail_id]
