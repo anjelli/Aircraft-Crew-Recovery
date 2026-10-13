@@ -6,6 +6,7 @@ operate/cancel MILP. The caller must provide approved offsets and resolved MGT.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from math import isfinite
 from typing import Mapping, Sequence
 
@@ -51,7 +52,7 @@ def generate_flight_copies(
         if not isfinite(mgt) or mgt < 0:
             raise ValueError(f"Invalid MGT for flight {fid!r}")
         for offset in offsets:
-            delta = __import__("datetime").timedelta(minutes=offset)
+            delta = timedelta(minutes=offset)
             copies.append(FlightCopy(
                 copy_id=f"{fid}__D{offset:02d}",
                 flight_id=fid,
@@ -74,7 +75,7 @@ def feasible_copy_connection(first: FlightCopy, second: FlightCopy) -> bool:
         and first.destination == second.origin
         and first.equipment == second.equipment
         and second.std >= first.sta
-            + __import__("datetime").timedelta(minutes=first.mgt_min)
+            + timedelta(minutes=first.mgt_min)
     )
 
 
