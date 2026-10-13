@@ -295,7 +295,7 @@ def main() -> int:
             "flights_with_one_existing_pairing_candidate": int(single_option_before_pricing),
             "generated_pairing_candidates": int(generated_count),
             "generated_legal_pairing_domain_size": int(len(generated_pool)),
-            "pricing_explored_states": int(pricer._states_explored),
+            "pricing_explored_states": int(pricer.states_explored),
             "pricing_domain_status": "full-legal-candidate-enumeration-two-duty-pairing-domain",
             "duplicate_generated_pairings_skipped": int(duplicate_generated),
             "validated_pairing_candidates": int(len(candidate_columns)),
