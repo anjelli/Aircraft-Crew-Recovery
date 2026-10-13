@@ -544,6 +544,7 @@ def solve_joint_operate_cancel_greedy(
                 for flight in sequence:
                     fid = str(flight["flight_id"])
                     preferred_tail_id = preferred_map.get(fid)
+                    options = []
                     if assignment_mode == "line_locked":
                         candidate_tails = (
                             [tail_by_id[preferred_tail_id]]
