@@ -22,6 +22,7 @@ for p in (ROOT, SRC):
 
 from column_generation import PairingColumn
 from crew_recovery.aircraft_line_inputs import load_aircraft_line_inventory
+from crew_recovery.aircraft_inventory import load_registered_aircraft_inventory
 from crew_recovery.independent_validator import (
     MGTResolver,
     Rules,
@@ -116,6 +117,8 @@ def main() -> int:
         "objective_policy": ["minimize_cancellations", "minimize_midnight_aware_crew_salary_plus_aircraft_start_cost"],
         "objective_cost_basis": "Crew salary uses cost_parameters.csv man_day_cost multiplied by each duty calendar day touched, including the second day when duty crosses midnight; other allowances and retiming are not yet integrated.",
         "aircraft_resources_are_provisional": True,
+        "registered_tail_inventory_loaded": False,
+        "operational_acceptance": False,
         "optimality_scope": "Only independently validated existing/generated pairing columns and generated aircraft route arcs.",
         "blockers": [],
     }
@@ -142,11 +145,22 @@ def main() -> int:
             (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
             return 0
 
-        aircraft, line_assignments = load_aircraft_line_inventory(
+        provisional_aircraft, line_assignments = load_aircraft_line_inventory(
             ROOT / "low_kgp", ROOT / "schedule_kgp.xlsx",
             start_date="2026-10-25", end_date="2027-03-27",
         )
         line_assignments.to_csv(out / "provisional_line_inventory.csv", index=False)
+        registered_inventory_path = ROOT / "aircraft_inventory.csv"
+        if registered_inventory_path.exists():
+            aircraft = load_registered_aircraft_inventory(registered_inventory_path)
+            summary["aircraft_resources_are_provisional"] = False
+            summary["registered_tail_inventory_loaded"] = True
+        else:
+            aircraft = provisional_aircraft
+            summary["blockers"].append({
+                "code": "VERIFIED_TAIL_INVENTORY_MISSING",
+                "detail": "No aircraft_inventory.csv found. LINE_n resources are only provisional line-of-work proxies; the solve is a research baseline, not an operational tail assignment.",
+            })
 
         report = pd.read_excel(ROOT / "pairing_report.xlsx")
         costs = load_cost_parameters(ROOT / "cost_parameters.csv")
@@ -324,6 +338,8 @@ def main() -> int:
             "operated_flights": int((decisions["recovery_action"] == "OPERATE").sum()),
             "cancelled_flights": int(len(cancelled)),
             "aircraft_resources": int(len(aircraft)),
+            "registered_tail_inventory_loaded": bool(summary["registered_tail_inventory_loaded"]),
+            "operational_acceptance": bool(summary["registered_tail_inventory_loaded"] and not aircraft_violations and not crew_coverage_errors),
             "aircraft_violations": aircraft_violations,
             "crew_coverage_errors": crew_coverage_errors,
             "solver_message": result.solver_message,
@@ -332,7 +348,7 @@ def main() -> int:
             "minimum_cancellation_count_proven": result.minimum_cancellation_count_proven,
             "full_lexicographic_optimum_proven": result.optimal_over_supplied_columns,
             "assumptions": [
-                "Aircraft LINE_n identifiers and starting states are inferred from AIRFLITE lines of work, not verified tail registrations.",
+                "When aircraft_inventory.csv is absent, LINE_n identifiers and starting states are inferred from AIRFLITE lines of work, not verified tail registrations.",
                 "MGTResolver uses the validator's documented demo aircraft-group mapping; owner-approved equipment-group compatibility remains required.",
                 "No retiming or flight-copy generation is supported in this prototype.",
                 "Optimality is restricted to existing pairing-report columns independently marked VALID and the generated aircraft route arcs.",
