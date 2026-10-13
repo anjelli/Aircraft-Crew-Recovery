@@ -54,6 +54,7 @@ class ResourceConstrainedPairingPricer:
         max_sectors_per_duty: int = 4,
         max_duties: int = 2,
         focus_flight_ids: Sequence[str] | None = None,
+        pairing_cost_fn: Callable[[Sequence[Flight], Sequence[Sequence[int]], str], float] | None = None,
     ) -> None:
         if not flights:
             raise ValueError("flights must not be empty")
@@ -87,6 +88,7 @@ class ResourceConstrainedPairingPricer:
         self.max_sectors = int(max_sectors_per_duty)
         self.max_duties = int(max_duties)
         self.focus_flight_ids = None if focus_flight_ids is None else frozenset(str(x) for x in focus_flight_ids)
+        self.pairing_cost_fn = pairing_cost_fn
         self._duties: tuple[_Duty, ...] | None = None
         self._states_explored = 0
 
@@ -194,10 +196,13 @@ class ResourceConstrainedPairingPricer:
             return None
         if violations:
             return None
+        cost = self.pairing_cost if self.pairing_cost_fn is None else float(self.pairing_cost_fn(seq, splits, pairing_type))
+        if not isfinite(cost) or cost < 0:
+            return None
         return PairingColumn(
             column_id=self._column_id(pairing_type, ids),
             flight_ids=ids,
-            cost=self.pairing_cost,
+            cost=cost,
             pairing_type=pairing_type,
             is_multi_day=len(splits) > 1,
             num_duties=len(splits),
