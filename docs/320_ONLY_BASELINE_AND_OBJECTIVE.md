@@ -1,36 +1,45 @@
-# 320-only baseline and recovery objective policy
+# Full-fleet recovery scope and objective policy
 
-## Aircraft line interpretation
+## Scope
 
-The supplied AIRFLITE lines-of-work file has a metadata row before its CSV header. In the supplied file, lines 1–5 contain only equipment code `320`; lines 6–13 are `32N`, lines 14–16 are `32P`, and lines 17–31 are `32Q`. The initial experiment therefore uses lines 1–5 and exact `Eqp=320` matching. It does not assume interchangeability across subfleets.
+The operational recovery horizon is **25 October 2026 through 27 March 2027 inclusive (154 departure dates)**. The canonical schedule contains four equipment codes: `320`, `32N`, `32P`, and `32Q`. All four remain in scope.
 
-Reconciliation for departure dates 25 October 2026 through 27 March 2027 found 3,807 scheduled `320` flights and 3,807 flights in lines 1–5. All matched exactly by flight number, departure timestamp, origin, destination and equipment.
+The supplied AIRFLITE lines-of-work export has a metadata row before the CSV header. Its line inventory is organized as follows:
 
-| Provisional resource | Equipment | Initial station | Available from |
-|---|---|---|---|
-| LINE_1 | 320 | IPH | 25 Oct 2026 08:55 |
-| LINE_2 | 320 | CGK | 25 Oct 2026 09:40 |
-| LINE_3 | 320 | SIN | 25 Oct 2026 10:20 |
-| LINE_4 | 320 | HAK | 25 Oct 2026 11:00 |
-| LINE_5 | 320 | SIN | 25 Oct 2026 12:50 |
+| Line numbers | Equipment code | Intended use |
+|---|---|---|
+| 1–5 | 320 | Full-fleet inventory and recovery |
+| 6–13 | 32N | Full-fleet inventory and recovery |
+| 14–16 | 32P | Full-fleet inventory and recovery |
+| 17–31 | 32Q | Full-fleet inventory and recovery |
 
-These are **provisional planning resources**, not actual aircraft tail numbers. The initial station and availability timestamp are inferred from each line's first listed flight. No claim is made about real tail registration, maintenance or availability before that time. The loader rechecks the source reconciliation and fails closed if the data changes. `originals/` remains untouched.
+The generalized `load_aircraft_line_inventory` loader reads all lines by default, reconciles the flight instances against the canonical schedule, and fails closed when flight IDs, equipment, routes, or the selected horizon do not reconcile. A 320-only wrapper remains solely for focused tests and debugging; it is not the project scope.
+
+## Aircraft line interpretation and limitations
+
+The loader labels resources `LINE_n` based on AIRFLITE line numbers. These are **provisional planning resources, not verified aircraft tail registrations**. Initial station and availability are inferred from each line's first departure within the selected horizon. This does not establish actual tail registration, maintenance state, pre-horizon location, or availability.
+
+No cross-equipment compatibility is inferred. Default compatibility remains exact equipment-code equality until a validated crosswalk and owner-approved policy are available. A line that changes equipment code within the horizon is rejected instead of silently treated as a single compatible resource.
+
+The full-fleet loader's behavior is covered by synthetic tests. **Production-input reconciliation across all four equipment types remains a run-time acceptance gate**; passing synthetic tests is not evidence that the actual full fleet has reconciled or that a recovery solve exists. `originals/` remains untouched.
 
 ## Objective priorities
 
-Use a **lexicographic/staged solve**, not a single weighted sum with guessed huge penalties. This is a defensible industry-style recovery policy, but remains a proposed policy until the airline approves it.
+Use a **lexicographic/staged solve**, not a single weighted sum with guessed large penalties. This is a proposed operational policy and requires business-owner confirmation.
 
-1. **Hard feasibility:** all crew legality, MGT, equipment, station continuity and permitted retiming constraints must hold.
-2. **Minimize cancellations:** cancellation is the last resort. First find the minimum achievable cancellation count; fix that optimum before optimizing lower-priority objectives.
-3. **Minimize schedule impact:** among minimum-cancellation solutions, minimize total absolute retiming minutes; also report maximum and distribution of delay.
-4. **Minimize approved operating cost:** optimize crew costs, aircraft swapping/repositioning and unused duty/FDP costs only where cost definitions and units are understood.
-5. **Tie-break on efficiency:** minimize crew-set count or other efficiency metrics after higher-priority outcomes are fixed.
+1. **Hard feasibility:** crew legality, MGT, equipment compatibility, aircraft station continuity, crew rest/FDP and permitted retiming must hold.
+2. **Minimize cancellations:** cancellation is the last resort; fix the minimum achievable cancellation count before lower-priority optimization.
+3. **Minimize schedule impact:** among minimum-cancellation solutions, minimize total absolute retiming minutes; also report maximum delay and delay distribution.
+4. **Minimize approved operating cost:** optimize crew costs, aircraft swapping/repositioning and unused duty/FDP costs only when cost definitions and units are understood.
+5. **Tie-break on efficiency:** apply approved crew-set or other efficiency metrics only after higher-priority outcomes are fixed.
 
-The uploaded cost file has retiming costs 0.001, 0.003 and 0.006 for 5/10/15-minute tiers, but no cancellation cost. Combining these values directly could make a cancellation look cheaper than a retiming, contrary to the stated operational priority. Staged optimization avoids inventing a cancellation penalty. The file also contains `man_day_cost=785`, MGT assumptions and swapping-cost tiers; their provenance and objective units should be retained in reports rather than silently treated as fully approved.
+The supplied cost file has retiming tiers 0.001, 0.003 and 0.006 for 5/10/15-minute offsets, but no cancellation cost. These values must not be treated as directly comparable to a cancellation penalty. The revenue workbook also has incomplete joins and unresolved fare/PLF anomalies; it must not be used as a cancellation penalty until those issues are resolved.
 
-## Scope and gates
+## Implementation gates
 
-- Begin with only the five provisional 320 resources through 27 March 2027.
-- Keep other equipment codes out of this baseline.
-- Independently validate crew and aircraft transitions and compare tiny-instance solutions against exhaustive enumeration.
-- Expand to 32N/32P/32Q only after an explicit compatibility policy is established.
+1. Reconcile the complete 154-day schedule and all AIRFLITE lines across all four equipment codes.
+2. Validate the existing crew legality and MGT rule resolution on representative cases.
+3. Produce a one-week integrated crew-and-aircraft solve with explicit operate/retime/cancel decisions.
+4. Compare tiny instances against an independent exhaustive enumerator.
+5. Scale the same model to one month and then 154 days without resetting aircraft or crew state at window boundaries.
+6. Publish actual decisions, objective values, independent validation, and unresolved exceptions. A readiness export with `UNRESOLVED` rows is not a recovered schedule.
