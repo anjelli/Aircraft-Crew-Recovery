@@ -35,6 +35,7 @@ from crew_recovery.independent_validator import (
 )
 from crew_recovery.resource_constrained_pricing import ResourceConstrainedPairingPricer
 from crew_recovery.crew_costing import crew_salary_cost, generated_pairing_cost_callback
+from crew_recovery.pairing_scoring import pairing_efficiency_score
 from crew_recovery.objective_spec import load_cost_parameters
 from crew_recovery.joint_recovery import solve_joint_operate_cancel
 
@@ -116,6 +117,7 @@ def main() -> int:
         "retiming_supported": False,
         "objective_policy": ["minimize_cancellations", "minimize_midnight_aware_crew_salary_plus_aircraft_start_cost"],
         "objective_cost_basis": "Crew salary uses cost_parameters.csv man_day_cost multiplied by each duty calendar day touched, including the second day when duty crosses midnight; other allowances and retiming are not yet integrated.",
+        "candidate_ranking": "Salary cost per covered sector, then duty count; ordering only, every legal generated column is retained. This is a heuristic baseline, not trained ML.",
         "aircraft_resources_are_provisional": True,
         "registered_tail_inventory_loaded": False,
         "operational_acceptance": False,
@@ -230,6 +232,7 @@ def main() -> int:
                 duty_start_buffer_minutes=rules.dsb,
                 duty_end_buffer_minutes=rules.deb,
             ),
+            candidate_score_fn=pairing_efficiency_score,
             hub="SIN",
             max_sectors_per_duty=4,
             max_duties=3,
@@ -328,6 +331,7 @@ def main() -> int:
             "three_duty_focus_flights": int(len(uncovered_flights)),
             "generated_pairing_candidates": int(generated_count),
             "generated_legal_pairing_domain_size": int(len(generated_pool)),
+            "candidate_scoring": "salary-cost-per-sector heuristic; all generated legal columns retained",
             "pricing_explored_states": int(pricer.states_explored),
             "pricing_domain_status": "all-legal-one/two-duty-domain-plus-three-duty-options-targeted-to-uncovered-flights",
             "duplicate_generated_pairings_skipped": int(duplicate_generated),
