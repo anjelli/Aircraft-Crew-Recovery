@@ -1,4 +1,4 @@
-"""Fail-closed loader for provisional 320 resources from AIRFLITE lines of work."""
+"""Fail-closed loader for provisional aircraft resources from AIRFLITE lines of work."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,7 +10,10 @@ from crew_recovery.aircraft_rotation import Aircraft
 
 DEFAULT_START = "2026-10-25"
 DEFAULT_END = "2027-03-27"
-REQUIRED = {"Line Num", "Equip", "Flt Num", "Dept Sta", "Dept Date", "Dept Time", "Arvl Sta", "Arvl Date", "Arvl Time"}
+REQUIRED = {
+    "Line Num", "Equip", "Flt Num", "Dept Sta", "Dept Date", "Dept Time",
+    "Arvl Sta", "Arvl Date", "Arvl Time",
+}
 
 
 def _dt(day: object, hhmm: object) -> pd.Timestamp:
@@ -31,26 +34,34 @@ def _fid(number: object, std: pd.Timestamp) -> str:
     return f"{int(float(number))}_{std.strftime('%Y%m%dT%H%M%S')}"
 
 
-def load_320_line_inventory(
+def load_aircraft_line_inventory(
     lines_path: str | Path,
     schedule_path: str | Path,
     *,
     start_date: str = DEFAULT_START,
     end_date: str = DEFAULT_END,
-    line_numbers: Sequence[int] = (1, 2, 3, 4, 5),
+    line_numbers: Sequence[int] | None = None,
+    equipment_codes: Sequence[str] | None = None,
 ) -> tuple[list[Aircraft], pd.DataFrame]:
-    """Load lines 1-5 as provisional LINE_n resources and reconcile every 320 flight.
+    """Load all selected AIRFLITE lines and reconcile them against the canonical schedule.
 
     The first AIRFLITE row is metadata; the second row is the CSV header.
-    Starting station/time come from each line's first departure and are
-    planning assumptions, not actual tail-registration or maintenance data.
+    LINE_n IDs and first-departure start states are provisional planning
+    assumptions, not verified tail registrations, maintenance, or availability.
+    By default, every line/equipment code present in the requested departure-date
+    horizon is included. No cross-equipment compatibility is inferred.
     """
     start, end = pd.Timestamp(start_date).normalize(), pd.Timestamp(end_date).normalize()
     if end < start:
         raise ValueError("end_date must not precede start_date")
-    selected = {int(x) for x in line_numbers}
-    if not selected:
-        raise ValueError("At least one line number is required")
+    selected_lines = None if line_numbers is None else {int(x) for x in line_numbers}
+    if selected_lines is not None and not selected_lines:
+        raise ValueError("line_numbers cannot be empty when supplied")
+    selected_equipment = None if equipment_codes is None else {
+        str(x).strip() for x in equipment_codes
+    }
+    if selected_equipment is not None and not selected_equipment:
+        raise ValueError("equipment_codes cannot be empty when supplied")
 
     lines = pd.read_csv(lines_path, encoding="utf-8-sig", skiprows=1, low_memory=False)
     missing = sorted(REQUIRED - set(lines.columns))
@@ -60,14 +71,18 @@ def load_320_line_inventory(
     lines["Line Num"] = pd.to_numeric(lines["Line Num"], errors="coerce")
     lines["Flt Num"] = pd.to_numeric(lines["Flt Num"], errors="coerce")
     lines["Equip"] = lines["Equip"].astype(str).str.strip()
-    lines = lines.loc[lines["Line Num"].isin(selected) & lines["Equip"].eq("320")].copy()
+    lines = lines.loc[lines["Line Num"].notna() & lines["Flt Num"].notna()].copy()
+    if selected_lines is not None:
+        lines = lines.loc[lines["Line Num"].isin(selected_lines)].copy()
+    if selected_equipment is not None:
+        lines = lines.loc[lines["Equip"].isin(selected_equipment)].copy()
     if lines.empty:
-        raise ValueError("No equipment-320 rows found for requested line numbers")
+        raise ValueError("No AIRFLITE line rows found for requested filters")
     lines["STD"] = [_dt(d, t) for d, t in zip(lines["Dept Date"], lines["Dept Time"])]
     lines["STA"] = [_dt(d, t) for d, t in zip(lines["Arvl Date"], lines["Arvl Time"])]
     lines = lines.loc[lines["STD"].dt.normalize().between(start, end)].copy()
     if lines.empty:
-        raise ValueError("No 320 line flights in requested departure-date horizon")
+        raise ValueError("No AIRFLITE line flights in requested departure-date horizon")
     lines["Line Num"] = lines["Line Num"].astype(int)
     lines["Flt Num"] = lines["Flt Num"].astype(int)
     lines["From"] = lines["Dept Sta"].astype(str).str.strip().str.upper()
@@ -84,14 +99,23 @@ def load_320_line_inventory(
     schedule["STA"] = pd.to_datetime(schedule["STA"], errors="coerce")
     schedule["Flt Num"] = pd.to_numeric(schedule["Flt Num"], errors="coerce")
     schedule["Eqp"] = schedule["Eqp"].astype(str).str.strip()
-    schedule = schedule.loc[schedule["Eqp"].eq("320") & schedule["STD"].dt.normalize().between(start, end)].copy()
+    schedule = schedule.loc[
+        schedule["STD"].notna()
+        & schedule["Flt Num"].notna()
+        & schedule["STD"].dt.normalize().between(start, end)
+    ].copy()
+    if selected_equipment is not None:
+        schedule = schedule.loc[schedule["Eqp"].isin(selected_equipment)].copy()
     schedule["From"] = schedule["From"].astype(str).str.strip().str.upper()
     schedule["To"] = schedule["To"].astype(str).str.strip().str.upper()
     schedule["flight_id"] = [_fid(n, t) for n, t in zip(schedule["Flt Num"], schedule["STD"])]
 
     keys = ["flight_id", "From", "To", "Eqp"]
+    # The supplied schedule export contains exact duplicate rows; collapse only
+    # exact duplicates, then reject any ambiguous flight-instance keys.
+    schedule = schedule.drop_duplicates().copy()
     if lines["flight_id"].duplicated().any() or schedule["flight_id"].duplicated().any():
-        raise ValueError("Duplicate flight IDs in 320 line/schedule input")
+        raise ValueError("Duplicate flight IDs in AIRFLITE line/schedule input")
     schedule_keys = set(map(tuple, schedule[keys].itertuples(index=False, name=None)))
     line_keys = set(map(tuple, lines[keys].itertuples(index=False, name=None)))
     if schedule_keys != line_keys:
@@ -101,23 +125,52 @@ def load_320_line_inventory(
             f"{len(line_keys - schedule_keys)} line flights are not in schedule"
         )
 
-    first = lines.sort_values(["Line Num", "STD", "flight_id"]).groupby("Line Num", as_index=False).first()
-    found = set(first["Line Num"].astype(int))
-    if found != selected:
-        raise ValueError(f"Expected line numbers {sorted(selected)}, found {sorted(found)}")
+    first = (
+        lines.sort_values(["Line Num", "STD", "flight_id"])
+        .groupby("Line Num", as_index=False)
+        .first()
+    )
+    observed_lines = set(lines["Line Num"].astype(int))
+    if selected_lines is not None and observed_lines != selected_lines:
+        raise ValueError(
+            f"Expected line numbers {sorted(selected_lines)}, found {sorted(observed_lines)}"
+        )
+    equipment_by_line = lines.groupby("Line Num")["Equip"].agg(lambda s: set(s.astype(str)))
+    mixed = {int(k): sorted(v) for k, v in equipment_by_line.items() if len(v) != 1}
+    if mixed:
+        raise ValueError(f"AIRFLITE line changes equipment within the horizon: {mixed}")
     aircraft = [
         Aircraft(
             tail_id=f"LINE_{int(r['Line Num'])}",
-            equipment="320",
+            equipment=str(r["Equip"]),
             start_station=str(r["From"]),
             available_at=pd.Timestamp(r["STD"]).to_pydatetime(),
         )
         for _, r in first.iterrows()
     ]
-    result = lines[["flight_id", "Line Num", "Flt Num", "STD", "STA", "From", "To", "Equip"]].rename(
-        columns={"Line Num": "line_num", "Flt Num": "flight_number", "Equip": "Eqp"}
-    )
+    result = lines[
+        ["flight_id", "Line Num", "Flt Num", "STD", "STA", "From", "To", "Equip"]
+    ].rename(columns={"Line Num": "line_num", "Flt Num": "flight_number", "Equip": "Eqp"})
     result["provisional_aircraft_id"] = result["line_num"].map(lambda x: f"LINE_{int(x)}")
     result["assignment_source"] = "AIRFLITE line-of-work; provisional, not actual tail"
     result = result.sort_values(["STD", "flight_id"]).reset_index(drop=True)
     return aircraft, result
+
+
+def load_320_line_inventory(
+    lines_path: str | Path,
+    schedule_path: str | Path,
+    *,
+    start_date: str = DEFAULT_START,
+    end_date: str = DEFAULT_END,
+    line_numbers: Sequence[int] = (1, 2, 3, 4, 5),
+) -> tuple[list[Aircraft], pd.DataFrame]:
+    """Backward-compatible 320-only wrapper; use load_aircraft_line_inventory for full fleet."""
+    return load_aircraft_line_inventory(
+        lines_path,
+        schedule_path,
+        start_date=start_date,
+        end_date=end_date,
+        line_numbers=line_numbers,
+        equipment_codes=("320",),
+    )
