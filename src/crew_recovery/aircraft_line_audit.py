@@ -9,9 +9,7 @@ import pandas as pd
 LINE_COLUMNS = {
     "flight_id", "line_num", "route_STD", "route_STA", "From", "To", "Eqp"
 }
-SCHEDULE_COLUMNS = {
-    "flight_id", "STD", "STA", "From", "To", "Eqp", "mgt_min", "mgt_status"
-}
+SCHEDULE_COLUMNS = {"flight_id", "mgt_min", "mgt_status"}
 
 
 def audit_aircraft_line_transitions(
