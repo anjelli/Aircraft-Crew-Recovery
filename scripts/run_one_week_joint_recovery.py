@@ -301,7 +301,7 @@ def main() -> int:
             "generated_pairing_candidates": int(generated_count),
             "generated_legal_pairing_domain_size": int(len(generated_pool)),
             "pricing_explored_states": int(pricer.states_explored),
-            "pricing_domain_status": "full-legal-candidate-enumeration-two-duty-pairing-domain",
+            "pricing_domain_status": "all-legal-one/two-duty-domain-plus-three-duty-options-targeted-to-uncovered-flights",
             "duplicate_generated_pairings_skipped": int(duplicate_generated),
             "validated_pairing_candidates": int(len(candidate_columns)),
             "invalid_pairing_candidates_in_status_report": int((statuses["Status"] == "INVALID").sum()),
