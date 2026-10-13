@@ -329,7 +329,7 @@ def main() -> int:
                 "recovered_STD_local": None if is_cancelled else str(active_records[fid]["STD_local"]),
                 "recovered_STA_local": None if is_cancelled else str(active_records[fid]["STA_local"]),
                 "recovery_action": "CANCEL" if is_cancelled else "OPERATE",
-                "cancellation_reason": "Selected by joint operate/cancel optimum; inspect pairing and aircraft feasibility audits." if is_cancelled else None,
+                "cancellation_reason": ("Not selected by the deterministic heuristic from the supplied validated pairing pool; not proof of operational infeasibility." if solver_mode.startswith("deterministic_greedy") else "Selected by the joint operate/cancel MILP; inspect pairing and aircraft feasibility audits.") if is_cancelled else None,
                 "assigned_pairing_id": None if is_cancelled else selected_map.get(fid),
                 "assigned_aircraft_tail": None if is_cancelled else result.aircraft_by_flight.get(fid),
                 "retime_minutes": 0,
