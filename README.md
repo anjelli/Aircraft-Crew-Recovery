@@ -1,64 +1,56 @@
 # Aircraft Crew Recovery
 
-A reproducible prototype for crew-pairing and aircraft-line recovery over three horizons. The deliverable is a flight-level operate/cancel plan plus pairing, aircraft-route, validation, and unresolved-data reports. It is **not an operationally approved airline schedule**: aircraft line numbers are proxies, retiming is not optimized, and the full business objective is not implemented.
+A reproducible research prototype for crew-pairing and aircraft-line recovery across 1-week, 1-month, and 154-day horizons. It exports flight-level operate/cancel decisions, pairing and aircraft-route assignments, validation reports, and explicit unresolved-data findings.
 
-## One command
+**Status: tested prototype; not operationally accepted.** Aircraft resources are provisional LINE_n proxies, nine full-horizon flights have unresolved MGT, retiming is not optimized, and the complete approved business objective is not integrated.
 
-Run from the repository root with Python 3.11:
+## Run the prototype
 
-```bash
-python -m pip install -r requirements.txt
-python setup_workspace.py
-python -m pytest -q tests
-python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
-```
+Use Python 3.11 from the repository root:
 
-The single recovery command runs:
-- **1W:** 25–31 Oct 2026
-- **1M:** 25 Oct–24 Nov 2026
-- **154D:** 25 Oct 2026–27 Mar 2027
+    python -m pip install -r requirements.txt
+    python setup_workspace.py
+    python -m pytest -q tests
+    python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
 
-## Deliverables
+The canonical runner exports 1W (25–31 Oct 2026), 1M (25 Oct–24 Nov 2026), and 154D (25 Oct 2026–27 Mar 2027) to output/joint_recovery/. Those run-specific outputs are regenerated locally and are not committed.
 
-`output/joint_recovery/` contains `1W/`, `1M/`, and `154D/` folders plus `horizon_summary.json`. Each horizon contains a flight-level decision CSV, selected crew pairings, aircraft rotations, validation evidence, a workbook named `recovery_<days>d.xlsx`, and `summary.json`.
+## Verified recovery snapshot
 
-For an experimental expanded candidate pool, run one horizon at a time first:
+The run-pinned metrics, heuristic comparison, independent line audit, limitations, and artifact link are maintained in the [Final Deliverable Status](docs/FINAL_DELIVERABLE_STATUS.md). The successful workflow run is [38475474585](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38475474585); it passed 108 tests and uploaded the three-horizon outputs and audit evidence.
 
-```bash
-python scripts/run_joint_recovery_horizons.py --horizons 1W --pairing-mode expanded --output-root output/joint_recovery_expanded --time-limit-seconds 180
-```
+## Candidate pool
 
-`existing-only` is the bounded default. `expanded` additionally runs the declared-domain legal pairing generator and can be expensive; it does not claim to generate every pairing that might be operationally legal. Begin with 1W before using it on longer horizons.
+The bounded default uses existing pairing-report columns that pass independent validation. To experiment with additional candidates in the declared pairing domain, begin with one week:
 
-Read `summary.json` first:
-- `OPERATE`: the flight is covered by one supplied, independently validated pairing and assigned to a feasible provisional aircraft route.
-- `CANCEL`: the heuristic/optimizer could not include the flight in the selected restricted candidate plan. This does **not** prove that cancellation is operationally necessary.
-- `UNRESOLVED_MGT`: the flight was excluded because the source MGT data is missing or conflicting. It is neither counted as operated nor silently labelled cancelled.
-- `solver_mode`: distinguishes the small-horizon MILP from the deterministic large-horizon feasibility heuristic. Heuristic results are feasible baselines, not optimal solutions.
+    python scripts/run_joint_recovery_horizons.py --horizons 1W --pairing-mode expanded --output-root output/joint_recovery_expanded --time-limit-seconds 180
 
-The one-week MILP already uses a lexicographic objective: first minimize cancellations, then minimize supplied pairing salary plus aircraft-start cost with cancellation count fixed. Long horizons now compare the previous single-pass heuristic with chronological ordering, retry-based selection, and (when available) line-preferred/line-locked variants built from the supplied provisional AIRFLITE line mapping. The summary reports the best plan and how many operated flights remain on their original provisional lines. This is diagnostic evidence, not a global optimality proof.
+Expanded generation can be expensive and is not guaranteed to enumerate every operationally legal pairing. Do not compare results from different pairing modes as if they were the same experiment.
 
-The flight-decision CSV now provides `cancellation_reason_code`, `cancellation_reason`, and `candidate_pairing_count`. Reason codes distinguish flights with no pairing candidate, pairing overlap, and aircraft-route insertion failure. Each horizon summary also compares the new best-of-three heuristic with the previous long-column-first single-order baseline using the same input candidate pool. For the MILP, the reason identifies non-selection within the current model. None of these codes proves global operational infeasibility. `UNRESOLVED_MGT` remains a separate data blocker, not a cancellation.
+## Interpreting decisions
 
-Retiming is still not integrated. See [Recovery objective and diagnostics](docs/RECOVERY_OBJECTIVE_AND_DIAGNOSTICS.md) for objective hierarchy, reason-code definitions, and known limits.
+- OPERATE: the flight is covered by a selected validated pairing and inserted into a feasible provisional aircraft route.
+- CANCEL: the flight was not selected in the restricted candidate plan. This is not proof that cancellation is operationally unavoidable.
+- UNRESOLVED_MGT: applicable turnaround data is missing, conflicting, or outside its effective dates. It is a data blocker, not a cancellation.
+- A zero count in the post-solve aircraft and crew-coverage checks means no issue was found by those checks under the current assumptions; it does not certify a real-world aircraft assignment.
 
-## Input ownership
+For long horizons, up to eight deterministic heuristic plans are compared. The chosen plan maximizes operated flights first and uses the supplied pairing/aircraft cost only to break coverage ties. This is a heuristic comparison, not a global optimality proof. The 1-week joint MILP proves its lexicographic optimum only over its restricted pairing and provisional-aircraft model.
 
-- `originals/`: immutable supplied schedule, pairing report, MGT, FDP, cost, and AIRFLITE line-of-work sources.
-- `input/`: prepared schedule and pairing report generated by `python setup_workspace.py`. Exact duplicate schedule rows are audited before preparation.
-- `src/crew_recovery/`: reusable solver, MGT, validation, aircraft and costing logic.
-- `scripts/`: the canonical three-horizon runner and supporting data preparation/audit commands.
-- `tests/`: regression and tiny-instance feasibility tests.
-- `docs/`: architecture, objective contract, and handoff notes.
-- `output/` and `logs/`: generated deliverables and historical evidence; never use these as input sources.
+## Source and folder ownership
 
-The recovery runner reads the prepared schedule/report from `input/` and rule/source files from `originals/`. It must not use duplicate files left in the repository root.
+- originals/: canonical, immutable supplied inputs and source implementations.
+- input/: prepared schedule and pairing report generated by setup_workspace.py.
+- src/crew_recovery/: reusable solver, MGT, costing, inventory, and validation modules.
+- scripts/: canonical recovery runner plus preparation and audit commands.
+- tests/: regression and small-instance tests.
+- docs/: architecture, project map, objective contract, and handoff.
+- output/: retained historical experiments plus ignored run-specific recovery outputs.
+- logs/ and patches/: historical run evidence and archived snapshots; not active recovery implementations.
 
-## Current data gaps
+Redundant copies of the supplied workbooks and CSV files have been removed from the repository root. Root-level Python shims are retained for backward compatibility; add new implementation code under src/crew_recovery/ or scripts/, not as duplicate root modules.
 
-1. The 154-day schedule contains flights with missing or conflicting applicable MGT. They are exported as `UNRESOLVED_MGT`; obtain corrected, effective-dated MGT rows from the rule owner.
-2. `low_kgp` is an aircraft lines-of-work source, not a tail-registration roster. The current assignments use provisional `LINE_n` resources. Provide actual tail IDs, equipment/subfleet, starting station, and availability time before operational acceptance.
-3. Equipment compatibility must be confirmed by the airline; absent an approved crosswalk, compatibility is exact equipment-code matching.
-4. The current recovery model does not select retimed flight copies and does not implement the full cancellation/retiming/crew-efficiency/crew-set objective. The cost/revenue audit remains separate from the active recovery objective.
+See [Project Structure](docs/PROJECT_STRUCTURE.md), [Codebase Map](docs/CODEBASE_MAP.md), and [Recovery Objective and Diagnostics](docs/RECOVERY_OBJECTIVE_AND_DIAGNOSTICS.md).
 
-See [Project Structure](docs/PROJECT_STRUCTURE.md) and [Final Deliverable Status](docs/FINAL_DELIVERABLE_STATUS.md) for details.
+## Operational blockers
+
+Operational use requires authoritative effective-dated MGT for unresolved flights, verified aircraft tail registrations and starting states (or an explicit approval to use abstract line resources), an owner-approved equipment compatibility crosswalk, and owner confirmation of the full cost/retiming/crew-set objective. The current prototype must not be presented as an operationally approved airline schedule.

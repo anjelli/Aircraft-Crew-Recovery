@@ -10,3 +10,7 @@ htmlcov/
 venv/
 *.egg-info/
 .DS_Store
+
+# Generated recovery runs; use the pinned CI artifact for published results
+/output/joint_recovery/
+/output/joint_recovery_expanded/
