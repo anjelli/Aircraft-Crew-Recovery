@@ -235,6 +235,18 @@ class ResourceConstrainedPairingPricer:
                     if col is not None:
                         yield col
 
+    def generate_candidates(self) -> tuple[PairingColumn, ...]:
+        """Enumerate all independently validated columns in the declared pairing domain.
+
+        This is useful when a coupled objective (for example, aircraft recovery)
+        makes crew-only reduced-cost filtering insufficient. The method does not
+        claim that the declared domain contains every operationally legal pairing.
+        """
+        unique: dict[str, PairingColumn] = {}
+        for column in self._candidate_columns():
+            unique.setdefault(column.column_id, column)
+        return tuple(unique[key] for key in sorted(unique))
+
     def __call__(self, dual_prices, active_column_ids, reduced_cost_tolerance, batch_size):
         # Local import avoids a module-level cycle with integrated_column_generation.
         from crew_recovery.integrated_column_generation import PricingBatch
