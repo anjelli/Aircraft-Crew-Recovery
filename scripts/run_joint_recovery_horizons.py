@@ -75,6 +75,7 @@ def main() -> int:
                 "operated_flights": r.get("operated_flights"),
                 "cancelled_flights": r.get("cancelled_flights"),
                 "uncovered_or_cancelled_flights": r.get("cancelled_flights"),
+                "flights_without_existing_pairing_candidate": r.get("flights_without_existing_pairing_candidate"),
                 "operated_coverage_pct": (
                     round(100.0 * r.get("operated_flights", 0) / r["active_flights"], 2)
                     if r.get("active_flights") else None
