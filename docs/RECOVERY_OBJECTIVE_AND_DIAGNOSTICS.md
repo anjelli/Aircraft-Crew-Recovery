@@ -13,7 +13,7 @@ The long-horizon fallback cannot prove a global optimum. It now constructs three
 - **Rare-flight columns first:** favor pairing columns that cover flights with fewer alternatives in the current candidate pool.
 - **Cost per flight first:** favor lower salary per covered flight, with longer columns breaking ties.
 
-The fallback chooses the plan with the most operated flights. Pairing plus aircraft-start cost breaks ties between plans with equal coverage. Its result is a better heuristic baseline, not a proof of minimum possible cancellations.
+The fallback chooses the plan with the most operated flights. Pairing plus aircraft-start cost breaks ties between plans with equal coverage. Each horizon's `summary.json` reports operated/cancelled counts for all three plans and the operated-flight gain against the previous long-column-first plan using the same candidate pool. Its result is a better heuristic baseline, not a proof of minimum possible cancellations.
 
 ## Constraints
 
