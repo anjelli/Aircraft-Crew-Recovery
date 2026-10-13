@@ -128,3 +128,18 @@ def test_pricer_does_not_claim_improvement_when_candidate_is_active():
 
     assert second.columns == ()
     assert second.certified_no_improving_column
+
+
+def test_full_candidate_enumeration_is_independent_of_reduced_cost_filter():
+    flights = [
+        flight("OUT", "SIN", "KUL", "2026-10-25T09:00"),
+        flight("BACK", "KUL", "SIN", "2026-10-26T08:00"),
+    ]
+    pricer = make_pricer(flights)
+    full_pool = pricer.generate_candidates()
+    zero_dual_batch = pricer(
+        {"OUT": 0.0, "BACK": 0.0}, frozenset(), 1e-7, 100
+    )
+
+    assert any(c.flight_ids == ("OUT", "BACK") and c.is_multi_day for c in full_pool)
+    assert zero_dual_batch.columns == ()
