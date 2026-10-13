@@ -220,8 +220,10 @@ def main() -> int:
                 "crew_coverage_errors": crew_coverage_errors,
             })
             summary["status"] = "BLOCKED_POST_SOLVE_VALIDATION_FAILED"
-        else:
+        elif result.optimal_over_supplied_columns:
             summary["status"] = "PROTOTYPE_OPTIMAL_OVER_SUPPLIED_COLUMNS"
+        else:
+            summary["status"] = "FEASIBLE_NOT_PROVEN_OPTIMAL"
         summary.update({
             "active_flights": int(len(active)),
             "validated_pairing_candidates": int(len(candidate_columns)),
@@ -235,7 +237,8 @@ def main() -> int:
             "crew_coverage_errors": crew_coverage_errors,
             "solver_message": result.solver_message,
             "secondary_objective": result.secondary_objective,
-            "minimum_cancellation_count_proven": True,
+            "minimum_cancellation_count_proven": result.minimum_cancellation_count_proven,
+            "full_lexicographic_optimum_proven": result.optimal_over_supplied_columns,
             "assumptions": [
                 "Aircraft LINE_n identifiers and starting states are inferred from AIRFLITE lines of work, not verified tail registrations.",
                 "MGTResolver uses the validator's documented demo aircraft-group mapping; owner-approved equipment-group compatibility remains required.",
