@@ -350,8 +350,10 @@ def main() -> int:
             "flights_with_one_existing_pairing_candidate": int(single_option_before_pricing),
             "three_duty_focus_flights": int(len(uncovered_flights)),
             "generated_pairing_candidates": int(generated_count),
-            "generated_legal_pairing_domain_size": int(len(generated_pool)),
-            "candidate_scoring": "salary-cost-per-sector heuristic; all generated legal columns retained",
+            "candidate_scoring": (
+                "not run; existing validated pairing columns only" if args.skip_pricing
+                else "salary-cost-per-sector heuristic; all generated legal columns retained"
+            ),
             "pricing_explored_states": int(pricing_states_explored),
             "generated_legal_pairing_domain_size": int(generated_domain_size),
             "pricing_skipped": bool(args.skip_pricing),
