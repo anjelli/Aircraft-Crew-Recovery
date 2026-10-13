@@ -198,12 +198,21 @@ def main() -> int:
             hub="SIN",
             max_sectors_per_duty=4,
         )
-        dual_prices = {str(fid): 1000.0 for fid in active["flight_id"]}
+        candidate_degree = {str(fid): 0 for fid in active["flight_id"]}
+        for col in candidate_columns:
+            for fid in col.flight_ids:
+                candidate_degree[fid] = candidate_degree.get(fid, 0) + 1
+        # Price uncovered/fragile flights first; this keeps the generated pool
+        # focused instead of materializing every legal pairing in the week.
+        dual_prices = {
+            fid: (1000.0 if degree == 0 else 0.1 if degree == 1 else 0.0)
+            for fid, degree in candidate_degree.items()
+        }
         priced_batch = pricer(
             dual_prices=dual_prices,
             active_column_ids=set(),
             reduced_cost_tolerance=0.0,
-            batch_size=100000,
+            batch_size=20000,
         )
         generated_count = 0
         duplicate_generated = 0
