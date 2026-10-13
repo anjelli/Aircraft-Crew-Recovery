@@ -7,6 +7,7 @@ network while preserving resource-specific start station/time constraints.
 """
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import timedelta
 from math import isfinite
@@ -137,17 +138,46 @@ def solve_joint_operate_cancel(
     arc_candidates: list[tuple[float, int, int, int]] = []
     incoming: dict[tuple[int, int], list[int]] = {(c, i): [] for c in range(n_c) for i in range(n_f)}
     outgoing: dict[tuple[int, int], list[int]] = {(c, i): [] for c in range(n_c) for i in range(n_f)}
+    # Index potential successors by equipment class and departure station.
+    # The previous all-pairs scan was O(equipment_classes * flights^2), making
+    # the 154-day horizon impractical. Binary-search the earliest departure
+    # that can satisfy arrival + MGT, then inspect only same-station candidates.
+    successors_by_class_origin: dict[int, dict[str, tuple[list[object], list[int]]]] = {}
+    for c, _eqp in enumerate(classes):
+        by_origin: dict[str, list[tuple[object, int]]] = {}
+        for j, flight in enumerate(records):
+            if eligible[c, j]:
+                station = str(flight["From"]).strip().upper()
+                by_origin.setdefault(station, []).append((flight["STD"], j))
+        successors_by_class_origin[c] = {
+            station: (
+                [entry[0] for entry in sorted(entries)],
+                [entry[1] for entry in sorted(entries)],
+            )
+            for station, entries in by_origin.items()
+        }
+
     for c, eqp in enumerate(classes):
+        by_origin = successors_by_class_origin[c]
         for i, first in enumerate(records):
             if not eligible[c, i]:
                 continue
-            for j in range(i + 1, n_f):
-                if not eligible[c, j]:
+            station = str(first["To"]).strip().upper()
+            indexed = by_origin.get(station)
+            if indexed is None:
+                continue
+            departure_times, candidate_indices = indexed
+            earliest = first["STA"] + timedelta(
+                minutes=_mgt_minutes(first.get("mgt_min"), str(first["flight_id"]))
+            )
+            start_at = bisect_left(departure_times, earliest)
+            for pos in range(start_at, len(candidate_indices)):
+                j = candidate_indices[pos]
+                if j <= i:
                     continue
-                if records[j]["STD"] < first["STA"]:
-                    continue
-                if _can_follow(first, records[j]):
-                    score = connection_priority_score(first, records[j])
+                second = records[j]
+                if _can_follow(first, second):
+                    score = connection_priority_score(first, second)
                     arc_candidates.append((score, c, i, j))
     # Rank promising direct returns and short feasible ground gaps first, but
     # retain every legal arc. Scoring is not a hard pruning rule.
