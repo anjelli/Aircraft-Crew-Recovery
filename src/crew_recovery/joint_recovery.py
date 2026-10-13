@@ -423,12 +423,13 @@ def solve_joint_operate_cancel_greedy(
 
     # Long pairings cover more flights per accepted decision. Salary per covered
     # flight breaks ties; stable IDs make repeated runs reproducible.
+    usable_pairings = [p for p in pairings if p.flight_ids and all(str(fid) in records for fid in p.flight_ids)]
     ordered = sorted(
-        pairings,
+        usable_pairings,
         key=lambda p: (
             -len(p.flight_ids),
             float(p.cost) / max(1, len(p.flight_ids)),
-            min(records[fid]["STD"] for fid in p.flight_ids if fid in records),
+            min(records[str(fid)]["STD"] for fid in p.flight_ids),
             p.column_id,
         ),
     )
