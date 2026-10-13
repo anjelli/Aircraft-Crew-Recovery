@@ -87,3 +87,18 @@ python run_pairing_experiment.py --horizons 1W --resource-constrained-pricing
 This optional run independently validates the builder's generated candidates and writes an audit report to `output/column_generation/1w_benchmark.json`. It may be expensive for the one-month horizon. The benchmark certifies results only over the supplied validated candidate pool, not over pairings the builder did not generate.
 
 This module solves the **LP relaxation** for the supplied finite universe. It does not implement branch-and-price and cannot claim integer optimality. It must not be represented as the missing production recovery solver. The formulation and staged implementation gates are documented in `COLUMN_GENERATION_FOUNDATION.md`. The operational objective remains blocked until its decision variables and business assumptions are defined and validated.
+
+
+## Joint recovery decision exports
+
+The bounded joint operate/cancel runner can be used to generate decision-level CSV/workbook artifacts for the three requested horizons:
+
+```bash
+python scripts/run_joint_recovery_horizons.py --time-limit-seconds 30
+```
+
+It writes `output/joint_recovery/1W/`, `1M/`, and `154D/`, plus `output/joint_recovery/horizon_summary.json`. To keep longer runs bounded, this runner uses only independently validated existing pairing-report columns and skips candidate pricing. Therefore cancellations can reflect a limited pairing pool; they are not proof of operational infeasibility. Aircraft resources remain provisional `LINE_n` resources unless verified tail inventory is supplied. Retiming remains inactive in the current joint MILP. Always inspect each `summary.json`, including blockers, solver status, and independent validation, before using the outputs.
+
+For the more expensive candidate-generation experiment, see the existing `run_one_week_joint_recovery.py` command and its `--skip-pricing` option. The readiness exports under `output/recovery/` are not optimized schedules.
+
+See [Project Structure](docs/PROJECT_STRUCTURE.md) for the canonical folder layout and output interpretation.
