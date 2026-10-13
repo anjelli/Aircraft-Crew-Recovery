@@ -367,3 +367,123 @@ def solve_joint_operate_cancel(
         optimal_over_supplied_columns=bool(cancellation_optimal and secondary_optimal),
         minimum_cancellation_count_proven=bool(cancellation_optimal),
     )
+
+
+def solve_joint_operate_cancel_greedy(
+    flights: Sequence[Mapping[str, object]],
+    pairings: Sequence[PairingColumn],
+    aircraft: Sequence[Aircraft],
+) -> JointRecoveryResult:
+    """Construct a deterministic feasible operate/cancel plan for large horizons.
+
+    This fallback is deliberately heuristic, not an optimizer. It greedily accepts
+    independently validated pairing columns only when every covered flight can
+    be inserted into a compatible, station-continuous aircraft route. Failed
+    insertions are rolled back atomically. Flights that cannot be covered by an
+    accepted pairing are cancelled. The result is always labelled non-optimal.
+    """
+    records = {str(f["flight_id"]): dict(f) for f in flights}
+    if not records:
+        raise ValueError("flights must not be empty")
+    tails = list(aircraft)
+    if not tails:
+        raise ValueError("aircraft inventory must not be empty")
+    routes: dict[str, list[dict[str, object]]] = {a.tail_id: [] for a in tails}
+    tail_by_id = {a.tail_id: a for a in tails}
+    covered: set[str] = set()
+    assigned: dict[str, str] = {}
+    selected: list[str] = []
+    total_cost = 0.0
+
+    def can_follow(first: Mapping[str, object], second: Mapping[str, object]) -> bool:
+        if str(first["To"]).strip().upper() != str(second["From"]).strip().upper():
+            return False
+        required = _mgt_minutes(first.get("mgt_min"), str(first["flight_id"]))
+        return second["STD"] >= first["STA"] + timedelta(minutes=required)
+
+    def try_insert(route: list[dict[str, object]], flight: dict[str, object], tail: Aircraft) -> int | None:
+        if str(flight["Eqp"]).strip() != tail.equipment.strip():
+            return None
+        pos = 0
+        while pos < len(route) and (route[pos]["STD"], str(route[pos]["flight_id"])) < (
+            flight["STD"], str(flight["flight_id"])
+        ):
+            pos += 1
+        if pos == 0:
+            if str(flight["From"]).strip().upper() != tail.start_station.strip().upper():
+                return None
+            if flight["STD"] < tail.available_at:
+                return None
+        elif not can_follow(route[pos - 1], flight):
+            return None
+        if pos < len(route) and not can_follow(flight, route[pos]):
+            return None
+        route.insert(pos, flight)
+        return pos
+
+    # Long pairings cover more flights per accepted decision. Salary per covered
+    # flight breaks ties; stable IDs make repeated runs reproducible.
+    ordered = sorted(
+        pairings,
+        key=lambda p: (
+            -len(p.flight_ids),
+            float(p.cost) / max(1, len(p.flight_ids)),
+            min(records[fid]["STD"] for fid in p.flight_ids if fid in records),
+            p.column_id,
+        ),
+    )
+    for pairing in ordered:
+        fids = tuple(str(fid) for fid in pairing.flight_ids)
+        if not fids or any(fid not in records for fid in fids):
+            continue
+        if any(fid in covered for fid in fids):
+            continue
+        # Pairings are inserted atomically: a partial route update is rolled back.
+        working_routes = {tid: list(route) for tid, route in routes.items()}
+        new_assignments: dict[str, str] = {}
+        feasible = True
+        sequence = sorted((records[fid] for fid in fids), key=lambda f: (f["STD"], str(f["flight_id"])))
+        for flight in sequence:
+            options = []
+            for tail in tails:
+                trial = list(working_routes[tail.tail_id])
+                inserted = try_insert(trial, flight, tail)
+                if inserted is None:
+                    continue
+                added_gap = 0.0
+                if inserted > 0:
+                    added_gap += (flight["STD"] - trial[inserted - 1]["STA"]).total_seconds()
+                if inserted + 1 < len(trial):
+                    added_gap += (trial[inserted + 1]["STD"] - flight["STA"]).total_seconds()
+                options.append((added_gap, len(trial), tail.tail_id, trial))
+            if not options:
+                feasible = False
+                break
+            _gap, _size, tail_id, chosen_route = min(options, key=lambda x: (x[0], x[1], x[2]))
+            working_routes[tail_id] = chosen_route
+            new_assignments[str(flight["flight_id"])] = tail_id
+        if not feasible:
+            continue
+        routes = working_routes
+        assigned.update(new_assignments)
+        covered.update(fids)
+        selected.append(pairing.column_id)
+        total_cost += float(pairing.cost)
+
+    used_tails = {assigned[fid] for fid in assigned}
+    total_cost += sum(float(tail_by_id[tid].start_cost) for tid in used_tails)
+    cancelled = tuple(sorted(set(records) - covered))
+    return JointRecoveryResult(
+        cancelled_flights=cancelled,
+        selected_pairing_ids=tuple(selected),
+        aircraft_by_flight=assigned,
+        cancellation_count=len(cancelled),
+        secondary_objective=total_cost,
+        solver_message=(
+            "Deterministic greedy feasible fallback; not optimized and not proven "
+            "minimum-cancellation. Restricted to supplied pairing columns and provisional aircraft resources."
+        ),
+        optimal_over_supplied_columns=False,
+        minimum_cancellation_count_proven=False,
+        retiming_supported=False,
+    )
