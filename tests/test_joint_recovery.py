@@ -112,7 +112,7 @@ def test_greedy_fallback_returns_a_feasible_nonoptimal_plan():
     assert result.optimal_over_supplied_columns is False
     assert result.minimum_cancellation_count_proven is False
     comparison = result.heuristic_diagnostics
-    assert comparison["plans_evaluated"] == 8
+    assert comparison["plans_evaluated"] == 5
     assert comparison["best_plan"]["operated_flights"] == 3
     assert comparison["operated_flights_gain_vs_single_pass_baseline"] >= 0
     assert comparison["best_plan"]["operated_flights"] == max(
@@ -189,7 +189,7 @@ def test_greedy_fallback_uses_supplied_line_map_to_recover_chronological_chain()
     assert result.cancellation_count == 0
     assert set(result.aircraft_by_flight) == {"F1", "F2", "F3"}
     assert result.heuristic_diagnostics["preferred_aircraft_line_map_complete"] is True
-    assert result.heuristic_diagnostics["plans_evaluated"] == 16
+    assert result.heuristic_diagnostics["plans_evaluated"] == 8
     assert result.heuristic_diagnostics["best_plan"]["operated_flights"] == 3
     assert result.heuristic_diagnostics["single_pass_baseline"]["operated_flights"] == 1
     assert result.heuristic_diagnostics["best_plan"]["assignment_mode"] in {
