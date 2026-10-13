@@ -262,7 +262,7 @@ class ResourceConstrainedPairingPricer:
                             if set(first.ids) & set(third.ids) or set(middle.ids) & set(third.ids):
                                 continue
                             seq = first.flights + middle.flights + third.flights
-                            if self.focus_flight_ids is not None and not (set(first.ids) | set(middle.ids) | set(third.ids)) & self.focus_flight_ids:
+                            if self.focus_flight_ids is not None and not ((set(first.ids) | set(middle.ids) | set(third.ids)) & self.focus_flight_ids):
                                 continue
                             split1 = len(first.flights)
                             split2 = split1 + len(middle.flights)
