@@ -112,9 +112,11 @@ def load_aircraft_line_inventory(
     schedule["flight_id"] = [_fid(n, t) for n, t in zip(schedule["Flt Num"], schedule["STD"])]
 
     keys = ["flight_id", "From", "To", "Eqp"]
-    # The supplied schedule export contains exact duplicate rows; collapse only
-    # exact duplicates, then reject any ambiguous flight-instance keys.
-    schedule = schedule.drop_duplicates().copy()
+    # Ignore export/index columns when removing repeated schedule instances.
+    # The canonical flight key must remain unique after this targeted collapse.
+    schedule = schedule.drop_duplicates(
+        subset=["STD", "STA", "Eqp", "Flt Num", "From", "To"]
+    ).copy()
     if lines["flight_id"].duplicated().any() or schedule["flight_id"].duplicated().any():
         raise ValueError("Duplicate flight IDs in AIRFLITE line/schedule input")
     schedule_keys = set(map(tuple, schedule[keys].itertuples(index=False, name=None)))
