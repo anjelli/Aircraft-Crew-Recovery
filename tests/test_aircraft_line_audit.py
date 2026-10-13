@@ -54,5 +54,19 @@ def test_aircraft_line_audit_does_not_claim_feasibility_with_unresolved_mgt():
     )
     assert summary["transitions_with_unresolved_predecessor_mgt"] == 1
     assert summary["status"] == "UNRESOLVED_MGT_RULES"
+    assert summary["unresolved_mgt_flight_count"] == 1
     assert summary["full_baseline_feasibility_proven"] is False
     assert "MGT_UNRESOLVED" in transitions.loc[1, "violation_codes"]
+
+
+
+def test_aircraft_line_audit_counts_unresolved_mgt_on_terminal_flight():
+    schedule = _schedule()
+    schedule.loc[schedule["flight_id"] == "F3", "mgt_min"] = float("nan")
+    schedule.loc[schedule["flight_id"] == "F3", "mgt_status"] = "MISSING_MGT_RULE"
+    transitions, summary = audit_aircraft_line_transitions(_lines(), schedule)
+    assert summary["transitions_with_unresolved_predecessor_mgt"] == 0
+    assert summary["unresolved_mgt_flight_count"] == 1
+    assert summary["unresolved_mgt_flight_ids"] == ["F3"]
+    assert summary["status"] == "UNRESOLVED_MGT_RULES"
+    assert summary["full_baseline_feasibility_proven"] is False
