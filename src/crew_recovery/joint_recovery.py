@@ -160,6 +160,7 @@ def solve_joint_operate_cancel(
     ub_rows = n_a * n_f + n_a
     a_eq = lil_matrix((eq_rows, n_var), dtype=float)
     b_eq = np.ones(eq_rows, dtype=float)
+    b_eq[2 * n_f:] = 0.0  # path-flow rows are equalities to zero
     a_ub = lil_matrix((ub_rows, n_var), dtype=float)
     b_ub = np.zeros(ub_rows, dtype=float)
 
