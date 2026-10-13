@@ -239,13 +239,13 @@ class ResourceConstrainedPairingPricer:
 
         # Three-duty pairings: hub -> layover A -> layover B -> hub.
         if self.max_duties >= 3:
-            middle_by_end: dict[str, list[_Duty]] = {}
+            middle_by_start: dict[str, list[_Duty]] = {}
             for duty in duties:
                 if duty.start_station in self.layover_stations and duty.end_station in self.layover_stations:
-                    middle_by_end.setdefault(duty.end_station, []).append(duty)
+                    middle_by_start.setdefault(duty.start_station, []).append(duty)
             for first_station in sorted(outbound):
                 for first in outbound[first_station]:
-                    for middle in middle_by_end.get(first.end_station, ()):
+                    for middle in middle_by_start.get(first.end_station, ()):
                         if middle.start_time <= first.end_time:
                             continue
                         if middle.start_time - first.end_time > self.max_layover:
