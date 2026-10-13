@@ -474,6 +474,13 @@ def solve_joint_operate_cancel_greedy(
         return float(pairing.cost) / max(1, len(pairing_fids[pairing.column_id]))
 
     orderings = {
+        "chronological_first": sorted(
+            usable_pairings,
+            key=lambda p: (
+                earliest_start(p), -len(pairing_fids[p.column_id]),
+                salary_per_flight(p), p.column_id,
+            ),
+        ),
         "long_pairings_first": sorted(
             usable_pairings,
             key=lambda p: (
