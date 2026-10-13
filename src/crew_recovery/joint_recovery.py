@@ -596,7 +596,7 @@ def solve_joint_operate_cancel_greedy(
             if fid in preferred_map and preferred_map[fid] == tail_id
         )
         return {
-            "name": f"{assignment_mode}__{ordering_name}",
+            "name": f"{assignment_mode}_{'single_pass' if retry_passes == 0 else 'retry'}__{ordering_name}",
             "ordering": ordering_name,
             "assignment_mode": assignment_mode,
             "covered": covered,
