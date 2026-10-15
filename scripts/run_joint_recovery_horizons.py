@@ -25,7 +25,12 @@ def main() -> int:
     parser.add_argument("--pairing-mode", choices=("existing-only", "expanded"), default="existing-only", help="existing-only uses validated report columns; expanded also runs bounded legal pairing generation and may be expensive on long horizons.")
     parser.add_argument("--output-root", type=Path, default=ROOT / "output" / "joint_recovery")
     parser.add_argument("--horizons", nargs="+", choices=[h[0] for h in HORIZONS], default=["1W", "1M", "154D"])
+    parser.add_argument("--scenario-file", type=Path, default=None, help="Optional versioned JSON disruption scenario to apply to every selected horizon.")
     args = parser.parse_args()
+    if args.scenario_file is not None:
+        if not args.scenario_file.is_file():
+            parser.error(f"Scenario file does not exist: {args.scenario_file}")
+        args.scenario_file = args.scenario_file.resolve()
     args.output_root.mkdir(parents=True, exist_ok=True)
     results = []
     exit_code = 0
@@ -42,6 +47,8 @@ def main() -> int:
         ]
         if args.pairing_mode == "existing-only":
             command.append("--skip-pricing")
+        if args.scenario_file is not None:
+            command.extend(["--scenario-file", str(args.scenario_file)])
         proc = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
         summary_path = out / "summary.json"
         summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {
@@ -63,6 +70,8 @@ def main() -> int:
         print(json.dumps(summary, indent=2))
     aggregate = {
         "scope": ("Best-effort joint operate/cancel runs; existing validated pairing columns only." if args.pairing_mode == "existing-only" else "Best-effort joint operate/cancel runs; existing plus generated validated pairing columns within the declared pairing domain."),
+        "scenario_file": str(args.scenario_file) if args.scenario_file is not None else None,
+        "scenario_mode": "explicit_disruption_scenario" if args.scenario_file is not None else "baseline_no_disruption",
         "objective": [
             "hard crew/MGT, equipment, aircraft start-state, station-continuity, and route constraints",
             "maximize operated flights (equivalently minimize cancellations) before any cost trade-off",
