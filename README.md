@@ -17,7 +17,7 @@ The canonical runner exports 1W (25–31 Oct 2026), 1M (25 Oct–24 Nov 2026), a
 
 ## Verified recovery snapshot
 
-The run-pinned metrics, schedule reconciliation findings, heuristic comparison, independent line audit, and limitations are maintained in the [Final Deliverable Status](docs/FINAL_DELIVERABLE_STATUS.md). The current recovery snapshot and per-horizon reconciliation outputs are available from [workflow run 38733921684](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38733921684). The aggregate `horizon_summary.json` also carries each horizon's objective ledger and reconciliation KPIs.
+The run-pinned metrics, schedule reconciliation findings, heuristic comparison, independent line audit, and limitations are maintained in the [Final Deliverable Status](docs/FINAL_DELIVERABLE_STATUS.md). The current recovery snapshot and aggregate reconciliation outputs are available from [workflow run 38754773496](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38754773496). The aggregate `horizon_summary.json` carries each horizon's objective ledger and reconciliation KPIs.
 
 ## Scenario inputs
 
