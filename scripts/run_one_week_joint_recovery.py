@@ -523,7 +523,10 @@ def main() -> int:
             summary["status"] = "FEASIBLE_NOT_PROVEN_OPTIMAL"
         if not summary["registered_tail_inventory_loaded"] and summary["status"] == "PROTOTYPE_OPTIMAL_OVER_SUPPLIED_COLUMNS":
             summary["status"] = "PROTOTYPE_OPTIMAL_WITH_PROVISIONAL_TAILS"
-        if solver_mode.startswith("deterministic_greedy"):
+        if (
+            solver_mode.startswith("deterministic_greedy")
+            and summary["status"] != "BLOCKED_POST_SOLVE_VALIDATION_FAILED"
+        ):
             summary["status"] = "HEURISTIC_FEASIBLE_NOT_OPTIMAL"
         if not missing_mgt.empty and summary["status"] != "BLOCKED_POST_SOLVE_VALIDATION_FAILED":
             summary["status_before_unresolved_mgt"] = summary["status"]
