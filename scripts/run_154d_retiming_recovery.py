@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Run retiming recovery directly over the complete 154-day planning horizon.
 
-This is a thin, explicit entry point over the existing bounded retiming search.
-It does not claim global optimality: retiming remains limited to the selected
-downstream flights and configured offset grid, while the underlying long-horizon
-recovery uses the repository's deterministic heuristic and provisional aircraft
-resources unless verified tail inventory is supplied.
+Run the bounded retiming search over the complete 154-day planning horizon.
+The default uses expanded pairing generation so each trial can validate new
+pairing candidates against its retimed schedule. This is still a finite-grid
+search, not global continuous-time optimization; aircraft resources remain
+provisional unless verified tail inventory is supplied.
 """
 from __future__ import annotations
 
@@ -24,7 +24,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario-file", type=Path, default=DEFAULT_SCENARIO)
     parser.add_argument("--time-limit-seconds", type=float, default=180.0)
-    parser.add_argument("--pairing-mode", choices=("existing-only", "expanded"), default="existing-only")
+    parser.add_argument(
+        "--pairing-mode",
+        choices=("existing-only", "expanded"),
+        default="expanded",
+        help=(
+            "expanded regenerates and validates pairing candidates against each "
+            "retimed schedule; existing-only is a bounded diagnostic mode and can "
+            "leave disrupted flights with zero pairing candidates."
+        ),
+    )
     parser.add_argument("--max-retimed-flights", type=int, default=2)
     parser.add_argument("--retime-options", default="0,5",
                         help="Comma-separated recovery offsets in minutes; each must be 0..15.")
