@@ -29,7 +29,7 @@ jobs:
           --scenario-file scenarios/demo_disruption_1w.json
           --output-dir output/disruption_demo
           --max-retimed-flights 2
-          --retime-options=0,30,45,60
+          --retime-options=0,5,10,15
           --time-limit-seconds 10
           --require-positive-retiming
       - name: Audit supplied aircraft line baseline against MGT
