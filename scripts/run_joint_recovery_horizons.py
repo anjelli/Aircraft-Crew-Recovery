@@ -89,8 +89,8 @@ def main() -> int:
         proc = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
         # Keep one readable log per horizon inside the current run directory.
         (out.parent / f"{label}.log").write_text(
-            "COMMAND: " + " ".join(command) + "\n\\nSTDOUT:\\n" + proc.stdout
-            + "\nSTDERR:\\n" + proc.stderr,
+            "COMMAND: " + " ".join(command) + "\n\nSTDOUT:\n" + proc.stdout
+            + "\nSTDERR:\n" + proc.stderr,
             encoding="utf-8",
         )
         summary_path = out / "summary.json"
