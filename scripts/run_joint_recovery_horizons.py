@@ -33,15 +33,13 @@ def _reset_output(output_root: Path) -> None:
         raise ValueError(
             f"Refusing to clean the repository root or shared output directory: {output_root}"
         )
-    # Any external path is allowed only when it does not already exist; this lets
-    # tests use fresh temporary directories without permitting deletion of user data.
-    if allowed_parent not in output_root.parents:
+    # Production outputs use output/. Tests may pass a temporary directory; only
+    # the canonical default or an explicitly nested output/ directory is cleaned.
+    if allowed_parent in output_root.parents:
         if output_root.exists():
-            raise ValueError(
-                f"Refusing to clean an existing directory outside output/: {output_root}"
-            )
-    elif output_root.exists():
-        shutil.rmtree(output_root)
+            shutil.rmtree(output_root)
+    else:
+        output_root.mkdir(parents=True, exist_ok=True)
     output_root.mkdir(parents=True, exist_ok=True)
 
 
