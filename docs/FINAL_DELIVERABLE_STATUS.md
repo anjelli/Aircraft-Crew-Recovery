@@ -4,11 +4,11 @@
 
 ## Reference execution
 
-- Workflow: [GitHub Actions run 38733921684](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38733921684)
-- Tested PR head: b1ca91a6669d57e1646cf91e9f7e3352f3bbbd8e
+- Workflow: [GitHub Actions run 38754773496](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38754773496)
+- Tested code commit: f0727d8d8c56a7475d8f80c3934212947c393665
 - Result: success; the regression test suite, supplied-line baseline audit, all three horizon runs, and artifact upload passed.
 - Execution mode: existing-only. Additional pairing generation was skipped for bounded runtime; generated pairing candidates = 0.
-- Output package: [download recovered schedules and audit evidence](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38733921684/artifacts/11972375014).
+- Output package: [download recovered schedules and audit evidence](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38754773496/artifacts/11982548368).
 
 This pinned workflow run is the source of truth for the results below. A separate 1-week JSON supplied during the discussion reports 582 operated flights and 591 validated candidates; that is not the same result snapshot as this workflow, which reports 570 and 352. The available evidence does not establish why those runs differ. Do not mix metrics from the separate run into this table.
 
@@ -72,7 +72,7 @@ The recovered-schedules artifact contains the three horizon folders, each with:
 - a recovery workbook with a Schedule Reconciliation worksheet;
 - missing_mgt_rules.csv for the 154-day horizon.
 
-The audit folder includes the aircraft-line transition audit, its summary, data-quality/revenue audit outputs, and duplicate-row audit from workspace preparation. Run-specific outputs are not stored as current results in the Git tree; the artifact is the versioned execution evidence for this snapshot.
+The aggregate `horizon_summary.json` carries each horizon's objective ledger and reconciliation KPIs, so these results can be reviewed without opening all three per-horizon summaries. The audit folder includes the aircraft-line transition audit, its summary, data-quality/revenue audit outputs, and duplicate-row audit from workspace preparation. Run-specific outputs are not stored as current results in the Git tree; the artifact is the versioned execution evidence for this snapshot.
 
 ## Reproduce locally
 
