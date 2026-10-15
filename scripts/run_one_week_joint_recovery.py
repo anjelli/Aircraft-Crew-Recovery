@@ -40,6 +40,11 @@ from crew_recovery.operational_objective import objective_contract, current_reco
 from crew_recovery.objective_spec import load_cost_parameters
 from crew_recovery.joint_recovery import solve_joint_operate_cancel, solve_joint_operate_cancel_greedy
 from crew_recovery.project_paths import input_file, original_file
+from crew_recovery.recovery_scenario import (
+    apply_aircraft_events,
+    apply_flight_events,
+    load_recovery_scenario,
+)
 
 
 def _canonical_schedule(path: Path) -> pd.DataFrame:
@@ -108,6 +113,12 @@ def main() -> int:
         help="Use only independently valid existing pairing-report columns; useful for bounded horizon-scale smoke runs.",
     )
     parser.add_argument("--output-dir", type=Path, default=ROOT / "output" / "one_week_joint_recovery")
+    parser.add_argument(
+        "--scenario-file",
+        type=Path,
+        default=None,
+        help="Optional versioned JSON disruption scenario. Omit to run baseline_no_disruption.",
+    )
     args = parser.parse_args()
     if args.days < 1:
         parser.error("--days must be positive")
@@ -134,11 +145,38 @@ def main() -> int:
         "operational_acceptance": False,
         "optimality_scope": "Only independently validated existing/generated pairing columns and generated aircraft route arcs.",
         "blockers": [],
+        "scenario": {"status": "NOT_LOADED"},
+        "scenario_application": {"status": "NOT_APPLIED"},
+        "recovered_schedule_basis": (
+            "Scenario-adjusted schedule times/equipment are used as inputs. "
+            "The current solver does not optimize retiming decisions."
+        ),
     }
     try:
+        scenario = load_recovery_scenario(args.scenario_file)
+        summary["scenario"] = scenario.manifest_dict()
+        (out / "scenario_manifest.json").write_text(
+            json.dumps(scenario.manifest_dict(), indent=2) + "\n", encoding="utf-8"
+        )
+
         raw_schedule = _canonical_schedule(input_file("schedule.xlsx"))
         resolver = MGTResolver(original_file("MGT.xlsx"))
         prepared = prepare_schedule(raw_schedule, resolver)
+        baseline_values = prepared.set_index("flight_id")[["STD_local", "STA_local", "Eqp"]].copy()
+        prepared, scenario_application = apply_flight_events(
+            prepared,
+            scenario,
+            resolver,
+            start_date=start,
+            end_date=end,
+        )
+        for baseline_column, source_column in (
+            ("baseline_STD_local", "STD_local"),
+            ("baseline_STA_local", "STA_local"),
+            ("baseline_Eqp", "Eqp"),
+        ):
+            prepared[baseline_column] = prepared["flight_id"].map(baseline_values[source_column])
+        summary["scenario_application"] = scenario_application
         active = prepared.loc[prepared["Day"].dt.normalize().between(start, end)].copy().reset_index(drop=True)
         if active.empty:
             raise ValueError("No active flights found for requested one-week window")
@@ -184,6 +222,10 @@ def main() -> int:
                 "code": "VERIFIED_TAIL_INVENTORY_MISSING",
                 "detail": "No aircraft_inventory.csv found. LINE_n resources are only provisional line-of-work proxies; the solve is a research baseline, not an operational tail assignment.",
             })
+
+        aircraft, unavailable_aircraft_ids = apply_aircraft_events(aircraft, scenario)
+        summary["scenario_application"]["aircraft_unavailable_ids"] = unavailable_aircraft_ids
+        summary["scenario_application"]["aircraft_resources_after_events"] = len(aircraft)
 
         preferred_aircraft_by_flight = None
         if summary["aircraft_resources_are_provisional"]:
@@ -399,8 +441,11 @@ def main() -> int:
                 "From": active_records[fid]["From"],
                 "To": active_records[fid]["To"],
                 "Eqp": active_records[fid]["Eqp"],
-                "original_STD_local": str(active_records[fid]["STD_local"]),
-                "original_STA_local": str(active_records[fid]["STA_local"]),
+                "baseline_Eqp": active_records[fid]["baseline_Eqp"],
+                "original_STD_local": str(active_records[fid]["baseline_STD_local"]),
+                "original_STA_local": str(active_records[fid]["baseline_STA_local"]),
+                "scenario_STD_local": str(active_records[fid]["STD_local"]),
+                "scenario_STA_local": str(active_records[fid]["STA_local"]),
                 "recovered_STD_local": None if is_cancelled else str(active_records[fid]["STD_local"]),
                 "recovered_STA_local": None if is_cancelled else str(active_records[fid]["STA_local"]),
                 "recovery_action": "CANCEL" if is_cancelled else "OPERATE",
@@ -422,8 +467,11 @@ def main() -> int:
                     "service_date": pd.Timestamp(row["Day"]).date().isoformat(),
                     "flight_number": int(row["Flt Num"]),
                     "From": row["From"], "To": row["To"], "Eqp": row["Eqp"],
-                    "original_STD_local": str(row["STD_local"]),
-                    "original_STA_local": str(row["STA_local"]),
+                    "baseline_Eqp": row["baseline_Eqp"],
+                    "original_STD_local": str(row["baseline_STD_local"]),
+                    "original_STA_local": str(row["baseline_STA_local"]),
+                    "scenario_STD_local": str(row["STD_local"]),
+                    "scenario_STA_local": str(row["STA_local"]),
                     "recovered_STD_local": None, "recovered_STA_local": None,
                     "recovery_action": "UNRESOLVED_MGT",
                     "cancellation_reason_code": "MGT_RULE_UNRESOLVED",

@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "scenario_id": "baseline_no_disruption",
+  "description": "Copy this file and add explicit events for a reproducible recovery experiment.",
+  "events": []
+}

@@ -13,11 +13,28 @@ Use Python 3.11 from the repository root:
     python -m pytest -q tests
     python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
 
-The canonical runner exports 1W (25–31 Oct 2026), 1M (25 Oct–24 Nov 2026), and 154D (25 Oct 2026–27 Mar 2027) to output/joint_recovery/. Each horizon summary includes an `objective_ledger` that separates the objective actually optimized from operational cost terms that remain unintegrated. Those run-specific outputs are regenerated locally and are not committed.
+The canonical runner exports 1W (25–31 Oct 2026), 1M (25 Oct–24 Nov 2026), and 154D (25 Oct 2026–27 Mar 2027) to output/joint_recovery/. Each horizon summary includes an `objective_ledger` that separates the objective actually optimized from operational cost terms that remain unintegrated. Those run-specific outputs are regenerated locally and are not committed. The runner accepts an optional versioned disruption scenario; see [Scenario inputs](#scenario-inputs).
 
 ## Verified recovery snapshot
 
 The run-pinned metrics, heuristic comparison, independent line audit, limitations, and artifact link are maintained in the [Final Deliverable Status](docs/FINAL_DELIVERABLE_STATUS.md). The successful workflow run is [38475474585](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38475474585); it passed 108 tests and uploaded the three-horizon outputs and audit evidence.
+
+## Scenario inputs
+
+By default, the recovery runner uses `baseline_no_disruption`. To run a repeatable disruption experiment, copy `scenarios/template.json`, replace `scenario_id`, and add explicitly sourced events. Pass the same manifest to a one-week runner or the multi-horizon orchestrator:
+
+```bash
+python scripts/run_one_week_joint_recovery.py --days 7 --scenario-file scenarios/my_scenario.json --output-dir output/scenarios/my_scenario/1W
+python scripts/run_joint_recovery_horizons.py --horizons 1W 1M --scenario-file scenarios/my_scenario.json --output-root output/scenarios/my_scenario
+```
+
+Supported schema version 1 events are:
+
+- `FLIGHT_DELAY`: `event_id`, `flight_id`, positive integer `delay_minutes`. Shifts scheduled departure and arrival in both local and common-time columns.
+- `FLIGHT_EQUIPMENT_CHANGE`: `event_id`, `flight_id`, `equipment_code`. The equipment code must already occur in the canonical schedule; this does not create a compatibility rule.
+- `AIRCRAFT_UNAVAILABLE`: `event_id`, `aircraft_id`. Removes that resource for the entire run/window; time-bounded maintenance windows are not supported yet.
+
+Use canonical `flight_id` values from the schedule or a prior output. Scenario edits preserve the original `flight_id` and service-date membership, record baseline and scenario times separately, and re-resolve MGT after a delay/equipment change. Each run writes `scenario_manifest.json` and includes applied/skipped events in its summary. Unknown flight/resource IDs and unsupported event types fail closed. The current optimizer still chooses operate/cancel decisions; applying a delay in a scenario is not the same as optimizing retiming.
 
 ## Candidate pool
 
