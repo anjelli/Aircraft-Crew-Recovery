@@ -55,7 +55,11 @@ def build_schedule_reconciliation(
     recovered_sta = pd.to_datetime(frame["recovered_STA_local"], errors="coerce")
 
     baseline_equipment = frame["baseline_Eqp"].fillna("").astype(str).str.strip()
-    scenario_equipment = frame["Eqp"].fillna("").astype(str).str.strip()
+    scenario_equipment = (
+        frame["scenario_Eqp"].fillna("").astype(str).str.strip()
+        if "scenario_Eqp" in frame.columns
+        else frame["Eqp"].fillna("").astype(str).str.strip()
+    )
     equipment_changed = baseline_equipment.ne(scenario_equipment)
     baseline_equipment_missing = baseline_equipment.eq("")
     scenario_equipment_missing = scenario_equipment.eq("")
