@@ -19,6 +19,7 @@ SCHEMA_VERSION = 1
 SUPPORTED_EVENT_TYPES = {
     "FLIGHT_DELAY",
     "FLIGHT_EQUIPMENT_CHANGE",
+    "FLIGHT_RETIME",
     "AIRCRAFT_UNAVAILABLE",
 }
 _TOP_LEVEL_KEYS = {"schema_version", "scenario_id", "description", "events"}
@@ -30,6 +31,7 @@ class RecoveryEvent:
     event_type: str
     flight_id: str | None = None
     delay_minutes: int | None = None
+    offset_minutes: int | None = None
     equipment_code: str | None = None
     aircraft_id: str | None = None
 
@@ -42,6 +44,8 @@ class RecoveryEvent:
             row["flight_id"] = self.flight_id
         if self.delay_minutes is not None:
             row["delay_minutes"] = self.delay_minutes
+        if self.offset_minutes is not None:
+            row["offset_minutes"] = self.offset_minutes
         if self.equipment_code is not None:
             row["equipment_code"] = self.equipment_code
         if self.aircraft_id is not None:
@@ -104,6 +108,23 @@ def _parse_event(raw: object, index: int) -> RecoveryEvent:
         if isinstance(delay, bool) or not isinstance(delay, int) or delay <= 0:
             raise ValueError(f"event {event_id!r}.delay_minutes must be a positive integer")
         return RecoveryEvent(event_id, event_type, flight_id=flight_id, delay_minutes=delay)
+
+    if event_type == "FLIGHT_RETIME":
+        expected = {"event_id", "type", "flight_id", "offset_minutes"}
+        if set(raw) != expected:
+            raise ValueError(
+                f"{event_type} event {event_id!r} requires exactly {sorted(expected)}"
+            )
+        offset = raw["offset_minutes"]
+        if isinstance(offset, bool) or not isinstance(offset, int) or abs(offset) > 180:
+            raise ValueError(
+                f"event {event_id!r}.offset_minutes must be an integer between -180 and 180"
+            )
+        return RecoveryEvent(
+            event_id, event_type,
+            flight_id=_non_empty_string(raw["flight_id"], f"event {event_id!r}.flight_id"),
+            offset_minutes=offset,
+        )
 
     if event_type == "FLIGHT_EQUIPMENT_CHANGE":
         expected = {"event_id", "type", "flight_id", "equipment_code"}
@@ -225,7 +246,7 @@ def apply_flight_events(
     touched_events: dict[str, list[str]] = {}
 
     for event in scenario.events:
-        if event.event_type == "AIRCRAFT_UNAVAILABLE":
+        if event.event_type in {"AIRCRAFT_UNAVAILABLE", "FLIGHT_RETIME"}:
             continue
         assert event.flight_id is not None
         if event.flight_id not in lookup:
@@ -275,7 +296,10 @@ def apply_flight_events(
     summary = {
         "scenario_id": scenario.scenario_id,
         "status": "APPLIED",
-        "manifest_event_count": len(scenario.events),
+        "manifest_event_count": sum(
+            event.event_type in {"FLIGHT_DELAY", "FLIGHT_EQUIPMENT_CHANGE"}
+            for event in scenario.events
+        ),
         "flight_events_applied": len(applied_ids),
         "applied_event_ids": applied_ids,
         "skipped_outside_window_event_ids": skipped_outside_window,
@@ -286,6 +310,98 @@ def apply_flight_events(
     }
     return schedule, summary
 
+
+
+
+def apply_flight_retiming_events(
+    schedule: pd.DataFrame,
+    scenario: RecoveryScenario,
+    resolver: object,
+    *,
+    start_date: str | pd.Timestamp,
+    end_date: str | pd.Timestamp,
+    baseline_values: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Apply explicit retiming choices after disruption events and before revalidation.
+
+    The retiming offset is relative to the disruption-adjusted schedule. A
+    recovery copy may not depart or arrive before the original source schedule;
+    this prevents a trial from silently erasing more delay than is available.
+    """
+    schedule = schedule.copy()
+    events = [event for event in scenario.events if event.event_type == "FLIGHT_RETIME"]
+    active_start = pd.Timestamp(start_date).normalize()
+    active_end = pd.Timestamp(end_date).normalize()
+    lookup = {str(fid): idx for idx, fid in zip(schedule.index, schedule["flight_id"])}
+    if len(lookup) != len(schedule):
+        raise ValueError("Prepared schedule must contain unique flight_id values")
+    seen_flights: set[str] = set()
+    applied: list[str] = []
+    skipped: list[str] = []
+    changed: list[str] = []
+
+    for event in events:
+        assert event.flight_id is not None and event.offset_minutes is not None
+        fid = event.flight_id
+        if fid in seen_flights:
+            raise ValueError(f"Only one FLIGHT_RETIME event is allowed per flight_id: {fid!r}")
+        seen_flights.add(fid)
+        if fid not in lookup:
+            raise ValueError(f"Retiming event {event.event_id!r} references unknown flight_id {fid!r}")
+        idx = lookup[fid]
+        day = pd.Timestamp(schedule.loc[idx, "Day"]).normalize()
+        if day < active_start or day > active_end:
+            skipped.append(event.event_id)
+            continue
+        if fid not in baseline_values.index:
+            raise ValueError(f"Baseline schedule has no original times for flight_id {fid!r}")
+
+        delta = pd.Timedelta(minutes=event.offset_minutes)
+        new_std = pd.Timestamp(schedule.loc[idx, "STD_local"]) + delta
+        new_sta = pd.Timestamp(schedule.loc[idx, "STA_local"]) + delta
+        baseline_std = pd.Timestamp(baseline_values.loc[fid, "STD_local"])
+        baseline_sta = pd.Timestamp(baseline_values.loc[fid, "STA_local"])
+        if new_std < baseline_std or new_sta < baseline_sta:
+            raise ValueError(
+                f"Retiming event {event.event_id!r} would move {fid!r} before its original schedule; "
+                "reduce the negative offset or increase the disruption delay"
+            )
+        for column in ("STD_local", "STA_local", "STD", "STA"):
+            schedule.loc[idx, column] = pd.Timestamp(schedule.loc[idx, column]) + delta
+        applied.append(event.event_id)
+        if event.offset_minutes:
+            changed.append(fid)
+
+    for fid in changed:
+        idx = lookup[fid]
+        flight = schedule.loc[idx]
+        value, status = resolver.resolve(
+            str(flight["Eqp"]),
+            str(flight["To"]),
+            str(flight["Arvl Ctry"]),
+            pd.Timestamp(flight["STA_local"]).normalize(),
+        )
+        schedule.loc[idx, "mgt_min"] = value
+        schedule.loc[idx, "mgt_status"] = status
+
+    return schedule, {
+        "status": "APPLIED" if applied else "NOT_APPLIED",
+        "manifest_event_count": len(events),
+        "retiming_events_applied": len(applied),
+        "applied_event_ids": applied,
+        "skipped_outside_window_event_ids": skipped,
+        "retimed_flight_ids": sorted(changed),
+        "offsets_by_flight": {
+            event.flight_id: int(event.offset_minutes)
+            for event in events
+            if event.event_id in applied
+        },
+        "interpretation": (
+            "Retiming offsets are explicit candidate choices. The bounded recovery-search runner "
+            "evaluates alternative offsets by re-solving the schedule; a single-run invocation only "
+            "applies the offsets supplied in its scenario manifest."
+        ),
+    }
 
 def apply_aircraft_events(
     aircraft: Sequence[object],
