@@ -117,9 +117,9 @@ def _parse_event(raw: object, index: int) -> RecoveryEvent:
                 f"{event_type} event {event_id!r} requires exactly {sorted(expected)}"
             )
         offset = raw["offset_minutes"]
-        if isinstance(offset, bool) or not isinstance(offset, int) or abs(offset) > 180:
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0 or offset > 15:
             raise ValueError(
-                f"event {event_id!r}.offset_minutes must be an integer between -180 and 180"
+                f"event {event_id!r}.offset_minutes must be an integer between 0 and 15 minutes (supported retiming tiers)"
             )
         return RecoveryEvent(
             event_id, event_type,
