@@ -2,7 +2,7 @@
 
 A reproducible research prototype for crew-pairing and aircraft-line recovery across 1-week, 1-month, and 154-day horizons. It exports flight-level operate/cancel decisions, pairing and aircraft-route assignments, validation reports, and explicit unresolved-data findings.
 
-**Status: tested prototype; not operationally accepted.** Aircraft resources are provisional LINE_n proxies, nine full-horizon flights have unresolved MGT, retiming is not optimized, and the complete approved business objective is not integrated.
+**Status: prototype with a bounded disruption-retiming experiment; not operationally accepted.** The native joint solver still does not contain a flight-copy retiming objective, and the wrapper searches a finite grid around a small set of disrupted/nearby flights. Aircraft resources are provisional LINE_n proxies, nine full-horizon flights have unresolved MGT, and the complete approved business objective is not integrated.
 
 ## Run the prototype
 
@@ -25,7 +25,7 @@ First prepare the workspace, then run the checked-in non-empty 60-minute delay e
 
 ```powershell
 python setup_workspace.py
-python scripts/run_disruption_recovery.py --scenario-file scenarios/demo_disruption_1w.json --output-dir output/disruption_demo --max-retimed-flights 2 --retime-options=0,45,60,90 --time-limit-seconds 90 --require-positive-retiming
+python scripts/run_disruption_recovery.py --scenario-file scenarios/demo_disruption_1w.json --output-dir output/disruption_demo --max-retimed-flights 2 --retime-options=0,5,10 --time-limit-seconds 10 --require-positive-retiming
 ```
 
 The script applies the disruption, discovers nearby downstream flights, tries the configured offset grid, reruns pairing validation and the recovery solve for each candidate, and keeps the best candidate using this order: cancelled flights, total absolute selected retiming among operated flights, then the native solver's partial pairing-plus-aircraft-start cost. It exports the selected run to `output/disruption_demo/recovered_schedule/`, including `flight_decisions.csv`, `aircraft_rotations.csv`, `selected_pairings.csv`, `schedule_reconciliation.csv`, `summary.json`, and `recovery_7d.xlsx`. `search_summary.json` records each trial and the chosen offsets.
@@ -64,7 +64,7 @@ Expanded generation can be expensive and is not guaranteed to enumerate every op
 - CANCEL: the flight was not selected in the restricted candidate plan. This is not proof that cancellation is operationally unavoidable.
 - UNRESOLVED_MGT: applicable turnaround data is missing, conflicting, or outside its effective dates. It is a data blocker, not a cancellation.
 - A zero count in the post-solve aircraft and crew-coverage checks means no issue was found by those checks under the current assumptions; it does not certify a real-world aircraft assignment.
-- `schedule_reconciliation.csv` distinguishes changes introduced by a disruption scenario from cancellations or unresolved flights in the recovery output. Since retiming is not optimized, operated-flight times must match the scenario-adjusted schedule.
+- `schedule_reconciliation.csv` distinguishes original times, disruption-adjusted times, and recovered times. It checks that each operated flight matches its explicit chosen retiming offset; this is a consistency check, not a global retiming-optimality or full operational-feasibility certificate.
 
 For long horizons, up to eight deterministic heuristic plans are compared. The chosen plan maximizes operated flights first and uses the supplied pairing/aircraft cost only to break coverage ties. This is a heuristic comparison, not a global optimality proof. The 1-week joint MILP proves its lexicographic optimum only over its restricted pairing and provisional-aircraft model.
 
@@ -85,4 +85,4 @@ See [Project Structure](docs/PROJECT_STRUCTURE.md), [Codebase Map](docs/CODEBASE
 
 ## Operational blockers
 
-Operational use requires authoritative effective-dated MGT for unresolved flights, verified aircraft tail registrations and starting states (or an explicit approval to use abstract line resources), an owner-approved equipment compatibility crosswalk, and owner confirmation of the full cost/retiming/crew-set objective. The current prototype must not be presented as an operationally approved airline schedule.
+Operational use requires authoritative effective-dated MGT for unresolved flights, verified aircraft tail registrations and starting states (or an explicit approval to use abstract line resources), an owner-approved equipment compatibility crosswalk, and owner confirmation of the full cost/retiming/crew-set objective. The bounded retiming wrapper is a finite-grid experiment, not integration of the full flight-copy retiming term into the native joint MILP. The current prototype must not be presented as an operationally approved airline schedule.
