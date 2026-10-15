@@ -120,7 +120,7 @@ def test_flight_delay_and_equipment_change_preserve_id_and_reresolve_mgt(tmp_pat
     assert flight["STA_local"] == pd.Timestamp("2026-10-25 09:15")
     assert flight["STD"] == pd.Timestamp("2026-10-25 00:15")
     assert flight["STA"] == pd.Timestamp("2026-10-25 01:15")
-    assert flight["flight_id"] == "F1_20261025T080000"
+    assert flight.name == "F1_20261025T080000"
     assert flight["Day"] == pd.Timestamp("2026-10-25")
     assert flight["Eqp"] == "32N"
     assert flight["mgt_min"] == 65
