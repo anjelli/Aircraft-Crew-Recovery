@@ -16,26 +16,43 @@ This document distinguishes the canonical recovery path from older research and 
 
 ```mermaid
 flowchart TD
-    INPUTS["Source schedule, pairing report, MGT rules"] --> PREP["Prepare canonical inputs"]
-    PREP --> RUN["Run selected horizon"]
+    SRC_SCH["Source schedule"] --> PREP["Prepare canonical inputs"]
+    SRC_REP["Source pairing report"] --> PREP
+    PREP --> SCH["Prepared schedule"]
+    PREP --> REP["Prepared pairing report"]
+
+    HORIZONS["Multi-horizon runner"] --> RUN["Single-horizon runner"]
+    SCH --> RUN
+    MGT["MGT rules"] --> RUN
     SCENARIO["Optional disruption scenario"] -.-> RUN
-    LINES["AIRFLITE lines or verified aircraft inventory"] --> RESOURCES["Load aircraft resources"]
-    RUN --> MGT["Resolve MGT and identify eligible flights"]
-    MGT --> EXISTING["Validate existing pairings"]
-    CANDIDATES["Optional bounded candidate generation"] -.-> POOL["Candidate pool"]
-    EXISTING --> POOL
-    RESOURCES --> SOLVE["Recovery method: 1W MILP; longer-horizon heuristic"]
+
+    RUN --> ACTIVE["Apply scenario, resolve MGT, select eligible flights"]
+    ACTIVE --> PAIR_CHECK["Validate existing pairings"]
+    REP --> PAIR_CHECK
+    PAIR_CHECK --> EXISTING["Existing validated candidates"]
+    ACTIVE -.-> PRICER["Optional bounded candidate generation"]
+    EXISTING --> POOL["Candidate pool"]
+    PRICER -.-> POOL
+
+    LINES["AIRFLITE lines of work"] --> RESOURCES["Load aircraft resources"]
+    INVENTORY["Optional verified aircraft inventory"] --> RESOURCES
+    SCENARIO -.-> RESOURCES
+    ACTIVE --> SOLVE["Recovery selection"]
     POOL --> SOLVE
-    SOLVE --> CHECKS["Aircraft, crew, and schedule-reconciliation checks"]
-    CHECKS --> OUTPUTS["Flight decisions, pairings, rotations, summary"]
+    RESOURCES --> SOLVE
+    SOLVE --> CHECKS["Aircraft, crew, schedule-reconciliation checks"]
+    CHECKS --> OUTPUTS["Flight decisions, pairings, rotations, reports"]
     OUTPUTS --> AGG["Aggregate horizon summary"]
 
-    INPUTS --> AUDIT["Separate audit of supplied AIRFLITE line plan"]
+    SCH --> AUDIT["Independent audit of supplied line plan"]
+    MGT --> AUDIT
     LINES --> AUDIT
     AUDIT --> AUDIT_RESULT["Baseline line-audit report"]
 ```
 
-The coverage-LP/master-pricing loop in integrated_column_generation.py is a separate research path. It is not invoked by the canonical horizon runner and does not receive dual prices from the joint aircraft-and-crew recovery model. Do not draw it as a connected optimization stage in this current-implementation diagram.
+The one-week horizon uses the joint MILP; larger horizons use the deterministic coverage-first heuristic. The recovery method minimizes cancellations first and then uses the currently supported pairing and aircraft-start cost terms. The model does not optimize retiming, and AIRFLITE `LINE_n` resources are provisional when verified aircraft inventory is absent.
+
+The coverage-LP/master-pricing loop in `integrated_column_generation.py` is a separate research path. It is not invoked by the canonical horizon runner and does not receive dual prices from the joint aircraft-and-crew recovery model. Do not draw it as a connected optimization stage in this current-implementation diagram.
 
 ## Reusable implementation: src/crew_recovery/
 
