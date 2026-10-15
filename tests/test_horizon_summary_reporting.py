@@ -64,3 +64,30 @@ def test_horizon_summary_preserves_objective_and_reconciliation_audits(monkeypat
     assert horizon["objective_ledger"] == objective_ledger
     assert horizon["operated_flights"] == 9
     assert horizon["operational_acceptance"] is False
+
+def test_partial_horizon_run_only_clears_requested_horizon(tmp_path):
+    output_root = tmp_path / "joint_recovery"
+    for label in ("1W", "1M", "154D"):
+        folder = output_root / label
+        folder.mkdir(parents=True)
+        (folder / "summary.json").write_text(label, encoding="utf-8")
+        (output_root / f"{label}.log").write_text(label, encoding="utf-8")
+    (output_root / "horizon_summary.json").write_text("old aggregate", encoding="utf-8")
+
+    horizon_runner._reset_output(output_root, ["1W"])
+
+    assert not (output_root / "1W").exists()
+    assert not (output_root / "1W.log").exists()
+    assert not (output_root / "horizon_summary.json").exists()
+    assert (output_root / "1M" / "summary.json").read_text(encoding="utf-8") == "1M"
+    assert (output_root / "154D" / "summary.json").read_text(encoding="utf-8") == "154D"
+    assert (output_root / "1M.log").read_text(encoding="utf-8") == "1M"
+    assert (output_root / "154D.log").read_text(encoding="utf-8") == "154D"
+
+
+def test_horizon_cleanup_refuses_shared_output_parent(tmp_path):
+    import pytest
+
+    with pytest.raises(ValueError, match="shared output directory"):
+        horizon_runner._reset_output(horizon_runner.ROOT / "output", ["1W"])
+

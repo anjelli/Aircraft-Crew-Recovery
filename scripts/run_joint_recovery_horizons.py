@@ -1,9 +1,9 @@
 """Run joint crew/aircraft recovery for the configured horizons.
 
 Canonical output contract:
-- all generated current-run files live under output/joint_recovery/
-- each invocation replaces that directory to prevent stale/mixed outputs
-- historical committed experiments and immutable source inputs are untouched
+- generated files live under output/joint_recovery/
+- each invocation resets only the requested horizon folders/logs and rewrites the aggregate summary
+- unrequested horizon folders and immutable source inputs are untouched
 
 This is a bounded research prototype, not an operationally accepted airline plan.
 """
@@ -22,25 +22,36 @@ DEFAULT_OUTPUT = ROOT / "output" / "joint_recovery"
 HORIZONS = (("1W", 7), ("1M", 31), ("154D", 154))
 
 
-def _reset_output(output_root: Path) -> None:
-    """Replace only the selected run-output directory; never delete arbitrary paths."""
+def _reset_output(output_root: Path, selected_horizons: list[str]) -> None:
+    """Clear only the requested horizon outputs, never unrelated run folders."""
     output_root = output_root.expanduser().resolve()
     allowed_parent = (ROOT / "output").resolve()
-    # Production defaults are constrained to output/. Allow external directories
-    # for tests and deliberate temporary runs, but never delete the repository root
-    # or the shared output parent itself.
+    # Never let cleanup target the repository root or shared output parent.
+    # For a normal run, output_root is a dedicated directory below output/.
+    # Tests and deliberate runs may use a temporary/external dedicated directory.
     if output_root == ROOT.resolve() or output_root == allowed_parent:
         raise ValueError(
             f"Refusing to clean the repository root or shared output directory: {output_root}"
         )
-    # Production outputs use output/. Tests may pass a temporary directory; only
-    # the canonical default or an explicitly nested output/ directory is cleaned.
-    if allowed_parent in output_root.parents:
-        if output_root.exists():
-            shutil.rmtree(output_root)
-    else:
-        output_root.mkdir(parents=True, exist_ok=True)
     output_root.mkdir(parents=True, exist_ok=True)
+
+    # Do not remove the whole output_root: a partial run such as --horizons 1W
+    # must not touch an old or locked 1M/154D directory. The aggregate summary
+    # is always current-run-only, so it must be regenerated on every invocation.
+    for label in selected_horizons:
+        target = output_root / label
+        if target.is_symlink() or (target.exists() and not target.is_dir()):
+            target.unlink()
+        elif target.exists():
+            shutil.rmtree(target)
+
+        log_path = output_root / f"{label}.log"
+        if log_path.exists() or log_path.is_symlink():
+            log_path.unlink()
+
+    aggregate_path = output_root / "horizon_summary.json"
+    if aggregate_path.exists() or aggregate_path.is_symlink():
+        aggregate_path.unlink()
 
 
 def main() -> int:
@@ -72,7 +83,7 @@ def main() -> int:
             parser.error(f"Scenario file does not exist: {args.scenario_file}")
 
     try:
-        _reset_output(args.output_root)
+        _reset_output(args.output_root, args.horizons)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
 
