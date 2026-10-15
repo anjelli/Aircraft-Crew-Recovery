@@ -205,7 +205,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--retime-options",
-        default="-30,-15,0,15,30,45,60,90",
+        default="0,5,10,15",
         help="Comma-separated candidate offsets (minutes) relative to the disruption-adjusted times.",
     )
     parser.add_argument("--output-dir", type=Path, default=ROOT / "output" / "disruption_recovery")
@@ -238,12 +238,12 @@ def main() -> int:
         options = sorted(set(int(part.strip()) for part in args.retime_options.split(",")))
     except ValueError:
         parser.error("--retime-options must be a comma-separated list of integer minutes")
-    options = [value for value in options if -180 <= value <= 180]
+    options = [value for value in options if 0 <= value <= 15]
     if 0 not in options:
         options.append(0)
     options = sorted(set(options), key=lambda value: (abs(value), value))
     if len(options) < 2:
-        parser.error("At least two valid retiming options are required.")
+        parser.error("At least two valid retiming tiers between 0 and 15 minutes are required.")
 
     candidate_flights = _discover_retiming_flights(
         delayed_flights, delay_by_flight, start_date=args.start_date, days=args.days
