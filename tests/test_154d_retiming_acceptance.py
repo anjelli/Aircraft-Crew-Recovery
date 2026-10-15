@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from crew_recovery.recovery_scenario import (
     RecoveryScenario,
@@ -106,3 +111,120 @@ def load_recovery_scenario_from_dict(raw):
         return load_recovery_scenario(path)
     finally:
         path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# End-to-end regression: flights 485/486/487 through the real recovery runner.
+# ---------------------------------------------------------------------------
+_ROOT = Path(__file__).resolve().parents[1]
+_RUNNER = _ROOT / "scripts" / "run_one_week_joint_recovery.py"
+_FLIGHTS = {
+    "485": "485_20261025T132000",
+    "486": "486_20261025T154500",
+    "487": "487_20261025T175000",
+}
+_DELAY_485 = {
+    "event_id": "delay-flight-485", "type": "FLIGHT_DELAY",
+    "flight_id": _FLIGHTS["485"], "delay_minutes": 20,
+}
+
+
+def _run_recovery(tmp_path, name, events):
+    scenario = tmp_path / f"{name}.json"
+    scenario.write_text(json.dumps({
+        "schema_version": 1, "scenario_id": f"regression_{name}", "events": events,
+    }))
+    out = tmp_path / name
+    proc = subprocess.run(
+        [sys.executable, str(_RUNNER), "--start-date", "2026-10-25", "--days", "1",
+         "--time-limit-seconds", "60", "--skip-pricing",
+         "--scenario-file", str(scenario), "--output-dir", str(out)],
+        cwd=_ROOT, text=True, capture_output=True,
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    decisions = pd.read_csv(out / "flight_decisions.csv").set_index("flight_id", drop=False)
+    return out, decisions
+
+
+@pytest.fixture(scope="module")
+def recoveries(tmp_path_factory):
+    if not (_ROOT / "input" / "schedule.xlsx").is_file():
+        pytest.skip("input/schedule.xlsx not available")
+    tmp = tmp_path_factory.mktemp("recovery_485_487")
+    retimes = [
+        {"event_id": f"retime-{n}", "type": "FLIGHT_RETIME", "flight_id": _FLIGHTS[n], "offset_minutes": 5}
+        for n in ("486", "487")
+    ]
+    return {
+        "delay_only": _run_recovery(tmp, "delay_only", [_DELAY_485]),
+        "retimed": _run_recovery(tmp, "retimed", [_DELAY_485, *retimes]),
+    }
+
+
+def test_485_486_487_delay_only_is_not_recoverable_without_retiming(recoveries):
+    """Control: the failure is real, so a passing retimed run cannot be vacuous."""
+    _, decisions = recoveries["delay_only"]
+    for fid in _FLIGHTS.values():
+        assert decisions.loc[fid, "recovery_action"] == "CANCEL"
+        assert decisions.loc[fid, "cancellation_reason_code"] == "NO_VALID_PAIRING_CANDIDATE"
+
+
+def test_485_486_487_retimed_recovery_operates_with_valid_crew_and_aircraft(recoveries):
+    out, d = recoveries["retimed"]
+    ts = pd.to_datetime
+    expected_shift = {"485": 20, "486": 5, "487": 5}
+    for num, fid in _FLIGHTS.items():
+        row = d.loc[fid]
+        # The flights are actually operated, not merely retimed on paper.
+        assert row["recovery_action"] == "OPERATE", row["cancellation_reason_code"]
+        # Adjusted times: original + shift, duration preserved, equipment unchanged.
+        shift = pd.Timedelta(minutes=expected_shift[num])
+        assert ts(row["recovered_STD_local"]) == ts(row["original_STD_local"]) + shift
+        duration = ts(row["original_STA_local"]) - ts(row["original_STD_local"])
+        assert ts(row["recovered_STA_local"]) - ts(row["recovered_STD_local"]) == duration
+        assert row["recovered_Eqp"] == row["baseline_Eqp"] == "320"
+    assert d.loc[_FLIGHTS["485"], "retime_minutes"] == 0  # disruption, not a recovery retime
+    assert d.loc[_FLIGHTS["486"], "retime_minutes"] == 5
+    assert d.loc[_FLIGHTS["487"], "retime_minutes"] == 5
+
+    # Crew: one validated pairing covers all three flights; independent validator says VALID.
+    pairing_ids = {d.loc[f, "assigned_pairing_id"] for f in _FLIGHTS.values()}
+    assert len(pairing_ids) == 1 and next(iter(pairing_ids)) == "PAIR_11"
+    status = pd.read_csv(out / "pairing_validation_status.csv")
+    pairing_row = status[status["Pairing ID"].astype(str) == "11"].iloc[0]
+    assert pairing_row["Status"] == "VALID" and pairing_row["Violations"] == 0
+    selected = pd.read_csv(out / "selected_pairings.csv")
+    covered = set(selected.loc[selected["pairing_id"] == "PAIR_11", "flight_id"])
+    assert set(_FLIGHTS.values()) <= covered
+
+    # Crew connections inside the pairing, recomputed here from the exported times.
+    rot = pd.read_csv(out / "aircraft_rotations.csv").set_index("flight_id", drop=False)
+    seq = selected[selected["pairing_id"] == "PAIR_11"].sort_values("sequence")["flight_id"].tolist()
+    for prev, nxt in zip(seq, seq[1:]):
+        gap = (ts(rot.loc[nxt, "recovered_STD_local"]) - ts(rot.loc[prev, "recovered_STA_local"])).total_seconds() / 60
+        assert rot.loc[prev, "To"] == rot.loc[nxt, "From"]
+        assert gap >= rot.loc[prev, "mgt_min"], (prev, nxt, gap)
+
+    # Aircraft: station continuity and MGT on both sides of every affected flight.
+    operated = rot[rot["recovery_action"] == "OPERATE"]
+    for fid in _FLIGHTS.values():
+        tail = operated.loc[fid, "assigned_aircraft_tail"]
+        line = operated[operated["assigned_aircraft_tail"] == tail].copy()
+        line["_std"] = ts(line["recovered_STD_local"])
+        line = line.sort_values("_std").reset_index(drop=True)
+        i = int(line.index[line["flight_id"] == fid][0])
+        for a, b in ((i - 1, i), (i, i + 1)):
+            if a < 0 or b >= len(line):
+                continue
+            prev, nxt = line.loc[a], line.loc[b]
+            gap = (ts(nxt["recovered_STD_local"]) - ts(prev["recovered_STA_local"])).total_seconds() / 60
+            assert prev["To"] == nxt["From"], (prev["flight_id"], nxt["flight_id"])
+            assert gap >= prev["mgt_min"], (prev["flight_id"], nxt["flight_id"], gap)
+    violations = out / "aircraft_validation_violations.csv"
+    if violations.read_text().strip():
+        assert not pd.read_csv(violations)["flight_id"].isin(_FLIGHTS.values()).any()
+
+    # Recovery strictly improves on the delay-only control for these flights.
+    _, control = recoveries["delay_only"]
+    for fid in _FLIGHTS.values():
+        assert control.loc[fid, "recovery_action"] == "CANCEL"
