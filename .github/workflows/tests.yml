@@ -34,8 +34,8 @@ jobs:
           --scenario-file scenarios/demo_disruption_1w.json
           --output-dir output/disruption_demo
           --max-retimed-flights 2
-          --retime-options=0,45,60,90
-          --time-limit-seconds 90
+          --retime-options=0,60,90
+          --time-limit-seconds 45
           --require-positive-retiming
       - name: Upload recovery schedules and validation evidence
         if: always()
