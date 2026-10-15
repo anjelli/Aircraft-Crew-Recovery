@@ -1,43 +1,79 @@
-"""Run bounded joint crew/aircraft operate-cancel prototypes for 1W, 1M and 154D.
+"""Run joint crew/aircraft recovery for the configured horizons.
 
-This produces decision-level best-effort schedules. The default uses
-independently validated existing pairing-report columns; optional expanded mode
-also runs the declared-domain pairing generator. Results are candidate-pool
-limited and provisional when aircraft LINE_n resources are used; they are not
-operational acceptance.
+Canonical output contract:
+- all generated current-run files live under output/joint_recovery/
+- each invocation replaces that directory to prevent stale/mixed outputs
+- historical committed experiments and immutable source inputs are untouched
+
+This is a bounded research prototype, not an operationally accepted airline plan.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "run_one_week_joint_recovery.py"
+DEFAULT_OUTPUT = ROOT / "output" / "joint_recovery"
 HORIZONS = (("1W", 7), ("1M", 31), ("154D", 154))
+
+
+def _reset_output(output_root: Path) -> None:
+    """Replace only the selected run-output directory; never delete arbitrary paths."""
+    output_root = output_root.expanduser().resolve()
+    allowed_parent = (ROOT / "output").resolve()
+    if output_root == ROOT.resolve() or output_root == allowed_parent or allowed_parent not in output_root.parents:
+        raise ValueError(
+            f"Refusing to clean output path outside a dedicated output subdirectory: {output_root}"
+        )
+    if output_root.exists():
+        shutil.rmtree(output_root)
+    output_root.mkdir(parents=True, exist_ok=True)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--time-limit-seconds", type=float, default=180.0, help="MILP time limit per pass; longer horizons need more than the CI smoke-test limit.")
-    parser.add_argument("--pairing-mode", choices=("existing-only", "expanded"), default="existing-only", help="existing-only uses validated report columns; expanded also runs bounded legal pairing generation and may be expensive on long horizons.")
-    parser.add_argument("--output-root", type=Path, default=ROOT / "output" / "joint_recovery")
-    parser.add_argument("--horizons", nargs="+", choices=[h[0] for h in HORIZONS], default=["1W", "1M", "154D"])
-    parser.add_argument("--scenario-file", type=Path, default=None, help="Optional versioned JSON disruption scenario to apply to every selected horizon.")
+    parser.add_argument(
+        "--time-limit-seconds", type=float, default=180.0,
+        help="Solver time limit per run; long horizons use a deterministic heuristic.",
+    )
+    parser.add_argument(
+        "--pairing-mode", choices=("existing-only", "expanded"), default="existing-only",
+        help="existing-only is the stable default; expanded candidate generation may be expensive.",
+    )
+    parser.add_argument(
+        "--output-root", type=Path, default=DEFAULT_OUTPUT,
+        help="Dedicated run-output directory. Its previous contents are replaced before running.",
+    )
+    parser.add_argument(
+        "--horizons", nargs="+", choices=[h[0] for h in HORIZONS],
+        default=["1W", "1M", "154D"],
+    )
+    parser.add_argument("--scenario-file", type=Path, default=None)
     args = parser.parse_args()
+
+    if args.time_limit_seconds <= 0:
+        parser.error("--time-limit-seconds must be positive")
     if args.scenario_file is not None:
+        args.scenario_file = args.scenario_file.expanduser().resolve()
         if not args.scenario_file.is_file():
             parser.error(f"Scenario file does not exist: {args.scenario_file}")
-        args.scenario_file = args.scenario_file.resolve()
-    args.output_root.mkdir(parents=True, exist_ok=True)
+
+    try:
+        _reset_output(args.output_root)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+
     results = []
     exit_code = 0
     for label, days in HORIZONS:
         if label not in args.horizons:
             continue
-        out = args.output_root / label
+        out = args.output_root.resolve() / label
         command = [
             sys.executable, str(RUNNER),
             "--start-date", "2026-10-25",
@@ -49,13 +85,28 @@ def main() -> int:
             command.append("--skip-pricing")
         if args.scenario_file is not None:
             command.extend(["--scenario-file", str(args.scenario_file)])
+
         proc = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
         summary_path = out / "summary.json"
-        summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {
-            "status": "RUNNER_FAILED_WITHOUT_SUMMARY",
-            "return_code": proc.returncode,
-            "stderr_tail": proc.stderr[-3000:],
-        }
+        if summary_path.exists():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                summary = {
+                    "status": "INVALID_SUMMARY_JSON",
+                    "error": str(exc),
+                    "return_code": proc.returncode,
+                }
+                exit_code = 1
+        else:
+            summary = {
+                "status": "RUNNER_FAILED_WITHOUT_SUMMARY",
+                "return_code": proc.returncode,
+                "stdout_tail": proc.stdout[-2000:],
+                "stderr_tail": proc.stderr[-3000:],
+            }
+            exit_code = 1
+
         summary["horizon_label"] = label
         summary["pairing_pool_mode"] = args.pairing_mode
         summary["run_mode"] = (
@@ -64,22 +115,39 @@ def main() -> int:
             else "joint_operate_cancel_existing_plus_generated_validated_pairings"
         )
         summary["pricing_skipped_for_bounded_runtime"] = args.pairing_mode == "existing-only"
+        summary["runner_return_code"] = proc.returncode
+        (out / "summary.json").write_text(
+            json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+        )
         results.append(summary)
-        if proc.returncode:
+        if proc.returncode != 0:
             exit_code = 1
-        print(json.dumps(summary, indent=2))
+            print(f"[{label}] FAILED (exit={proc.returncode})", file=sys.stderr)
+            if proc.stderr:
+                print(proc.stderr[-3000:], file=sys.stderr)
+        else:
+            print(
+                f"[{label}] status={summary.get('status')} "
+                f"operated={summary.get('operated_flights')} "
+                f"cancelled={summary.get('cancelled_flights')}"
+            )
+
     aggregate = {
-        "scope": ("Best-effort joint operate/cancel runs; existing validated pairing columns only." if args.pairing_mode == "existing-only" else "Best-effort joint operate/cancel runs; existing plus generated validated pairing columns within the declared pairing domain."),
-        "scenario_file": str(args.scenario_file) if args.scenario_file is not None else None,
-        "scenario_mode": "explicit_disruption_scenario" if args.scenario_file is not None else "baseline_no_disruption",
+        "scope": (
+            "Best-effort joint operate/cancel runs; existing validated pairing columns only."
+            if args.pairing_mode == "existing-only"
+            else "Best-effort joint operate/cancel runs; existing plus generated pairing candidates "
+                 "within the declared pairing domain."
+        ),
+        "scenario_file": str(args.scenario_file) if args.scenario_file else None,
+        "scenario_mode": "explicit_disruption_scenario" if args.scenario_file else "baseline_no_disruption",
         "objective": [
             "hard crew/MGT, equipment, aircraft start-state, station-continuity, and route constraints",
-            "maximize operated flights (equivalently minimize cancellations) before any cost trade-off",
+            "maximize operated flights (equivalently minimize cancellations) before cost trade-off",
             "then minimize supplied pairing salary plus aircraft start cost",
-            "large-horizon heuristic compares the prior single-pass plans with chronological and cost-first retry plans, plus line-preferred and line-locked plans when provisional line assignments map; selects maximum coverage, then lower cost",
         ],
         "not_integrated": [
-            "flight-copy retiming selection",
+            "native-MILP flight-copy retiming selection",
             "full approved operating cost",
             "crew roster/set variables",
             "globally complete pairing generation",
@@ -96,14 +164,9 @@ def main() -> int:
                 "unresolved_mgt_flights": r.get("unresolved_mgt_flights", 0),
                 "operated_flights": r.get("operated_flights"),
                 "cancelled_flights": r.get("cancelled_flights"),
-                "uncovered_or_cancelled_flights": r.get("cancelled_flights"),
                 "solver_mode": r.get("solver_mode"),
                 "operated_coverage_pct_of_all_flights": r.get("operated_coverage_pct_of_all_flights"),
                 "flights_without_existing_pairing_candidate": r.get("flights_without_existing_pairing_candidate"),
-                "operated_coverage_pct": (
-                    round(100.0 * r.get("operated_flights", 0) / r["active_flights"], 2)
-                    if r.get("active_flights") else None
-                ),
                 "selected_pairings": r.get("selected_pairings"),
                 "validated_pairing_candidates": r.get("validated_pairing_candidates"),
                 "aircraft_violations": len(r.get("aircraft_violations", [])),
@@ -111,23 +174,22 @@ def main() -> int:
                 "operational_acceptance": r.get("operational_acceptance", False),
                 "blockers": r.get("blockers", []),
                 "unoperated_reason_counts_including_unresolved": r.get("unoperated_reason_counts_including_unresolved", {}),
-                "heuristic_plan_comparison": r.get("heuristic_plan_comparison", {}),
             }
             for r in results
         ],
         "interpretation": (
-            "1W uses the joint MILP when its input size is small. Month/full horizons use a "
-            "coverage-first heuristic that compares single-pass, chronological retry, and (when available) "
-            "AIRFLITE line-preserving assignment variants. The default existing-only mode uses validated "
-            "supplied pairing columns; --pairing-mode "
-            "expanded additionally runs the declared-domain pairing generator and may be expensive "
-            "on long horizons. Reason codes describe the selected restricted plan, not global "
-            "infeasibility. LINE_n resources are provisional. Flights with unresolved MGT are "
-            "reported separately, not counted as cancellations. Retiming is not optimized."
+            "The 1W MILP is optimal only over its restricted candidate/resource model. Longer "
+            "horizons use a deterministic coverage heuristic, not a global optimum. CANCEL means "
+            "not selected in the restricted plan, not globally infeasible. LINE_n resources are "
+            "provisional. Unresolved MGT is a blocker, not a cancellation. Retiming is not optimized "
+            "inside the native model."
         ),
     }
-    (args.output_root / "horizon_summary.json").write_text(json.dumps(aggregate, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"aggregate_summary": str(args.output_root / "horizon_summary.json"), "exit_code": exit_code}, indent=2))
+    aggregate_path = args.output_root.resolve() / "horizon_summary.json"
+    aggregate_path.write_text(json.dumps(aggregate, indent=2) + "\n", encoding="utf-8")
+    print(f"\nOutputs replaced in: {args.output_root.resolve()}")
+    print(f"Aggregate summary: {aggregate_path}")
+    print(f"Exit code: {exit_code}")
     return exit_code
 
 
