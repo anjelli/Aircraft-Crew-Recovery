@@ -13,7 +13,7 @@ Use Python 3.11 from the repository root:
     python -m pytest -q tests
     python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
 
-The canonical runner exports 1W (25–31 Oct 2026), 1M (25 Oct–24 Nov 2026), and 154D (25 Oct 2026–27 Mar 2027) to output/joint_recovery/. Each horizon summary includes an `objective_ledger` that separates the objective actually optimized from operational cost terms that remain unintegrated. Those run-specific outputs are regenerated locally and are not committed. The runner accepts an optional versioned disruption scenario; see [Scenario inputs](#scenario-inputs).
+The canonical runner exports 1W (25–31 Oct 2026), 1M (25 Oct–24 Nov 2026), and 154D (25 Oct 2026–27 Mar 2027) to output/joint_recovery/. Each horizon summary includes an `objective_ledger` that separates the objective actually optimized from operational cost terms that remain unintegrated. Each run also writes `schedule_reconciliation.csv`, comparing original schedule values, scenario-adjusted values, and recovered decisions; this checks output consistency and does not certify full operational feasibility. Those run-specific outputs are regenerated locally and are not committed. The runner accepts an optional versioned disruption scenario; see [Scenario inputs](#scenario-inputs).
 
 ## Verified recovery snapshot
 
@@ -50,6 +50,7 @@ Expanded generation can be expensive and is not guaranteed to enumerate every op
 - CANCEL: the flight was not selected in the restricted candidate plan. This is not proof that cancellation is operationally unavoidable.
 - UNRESOLVED_MGT: applicable turnaround data is missing, conflicting, or outside its effective dates. It is a data blocker, not a cancellation.
 - A zero count in the post-solve aircraft and crew-coverage checks means no issue was found by those checks under the current assumptions; it does not certify a real-world aircraft assignment.
+- `schedule_reconciliation.csv` distinguishes changes introduced by a disruption scenario from cancellations or unresolved flights in the recovery output. Since retiming is not optimized, operated-flight times must match the scenario-adjusted schedule.
 
 For long horizons, up to eight deterministic heuristic plans are compared. The chosen plan maximizes operated flights first and uses the supplied pairing/aircraft cost only to break coverage ties. This is a heuristic comparison, not a global optimality proof. The 1-week joint MILP proves its lexicographic optimum only over its restricted pairing and provisional-aircraft model.
 
