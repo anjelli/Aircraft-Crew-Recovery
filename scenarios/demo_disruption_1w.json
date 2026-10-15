@@ -4,7 +4,7 @@
   "description": "Reproducible one-week experiment: a 20-minute delay to flight 485 IPH-SIN on 25 Oct 2026 makes its following flight 486 SIN-IPH connection fall below the 50-minute turnaround requirement. The recovery search tests bounded retiming offsets and exports the selected recovered schedule.",
   "events": [
     {
-      "event_id": "delay-flight-248",
+      "event_id": "delay-flight-485",
       "type": "FLIGHT_DELAY",
       "flight_id": "485_20261025T132000",
       "delay_minutes": 20
