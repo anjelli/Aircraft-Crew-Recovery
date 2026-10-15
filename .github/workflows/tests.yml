@@ -24,9 +24,19 @@ jobs:
         run: python -m pytest -q tests
       - name: Audit supplied aircraft line baseline against MGT
         run: python scripts/audit_aircraft_line_baseline.py
-      - name: Solve and export 1W, 1M, and 154D recovery schedules
+      - name: Solve and export 1W, 1M, and 154D baseline schedules
         timeout-minutes: 20
         run: python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
+      - name: End-to-end disruption and retiming recovery test
+        timeout-minutes: 15
+        run: >-
+          python scripts/run_disruption_recovery.py
+          --scenario-file scenarios/demo_disruption_1w.json
+          --output-dir output/disruption_demo
+          --max-retimed-flights 2
+          --retime-options=0,45,60,90
+          --time-limit-seconds 90
+          --require-positive-retiming
       - name: Upload recovery schedules and validation evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -35,5 +45,6 @@ jobs:
           path: |
             output/joint_recovery/
             output/one_week_joint_recovery/
+            output/disruption_demo/
             output/audit/
           if-no-files-found: warn
