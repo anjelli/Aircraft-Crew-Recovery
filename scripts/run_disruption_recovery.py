@@ -336,6 +336,14 @@ def main() -> int:
         )
 
     output_root = args.output_dir.expanduser().resolve()
+    # This command owns only a dedicated subdirectory of output/. Never allow a
+    # bad --output-dir value to erase the repository, inputs, or unrelated files.
+    allowed_parent = (ROOT / "output").resolve()
+    if output_root == ROOT.resolve() or output_root == allowed_parent or allowed_parent not in output_root.parents:
+        parser.error(f"--output-dir must be a dedicated subdirectory under {allowed_parent}; got {output_root}")
+    # Remove stale trials and prior selected results before producing one coherent run.
+    if output_root.exists():
+        shutil.rmtree(output_root)
     trial_root = output_root / "trials"
     manifest_root = output_root / "trial_manifests"
     trial_root.mkdir(parents=True, exist_ok=True)

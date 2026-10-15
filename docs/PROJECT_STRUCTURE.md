@@ -15,7 +15,7 @@ Keep one canonical implementation path, one source-of-truth folder for supplied 
     ├── scripts/                        canonical runners, preparation and audit commands
     ├── tests/                          regression and small-instance tests
     ├── docs/                           project map, objective contract and handoff notes
-    ├── output/                         historical experiments plus ignored current run output
+    ├── output/                         local generated run output; fully ignored by Git
     ├── logs/                           historical solver logs
     └── patches/                        archived snapshots; not active modules
 
@@ -57,3 +57,13 @@ Each current horizon output contains a JSON summary, flight-level operate/cancel
 ## Do not broaden the handoff
 
 Retiming, flight-copy selection, verified tail registrations, an airline-approved equipment compatibility crosswalk, full operating costs, and the full crew roster/set objective remain unintegrated. The prototype handoff is complete when the standard run is reproducible, tests and independent checks pass, results are documented, and these limitations are explicit. Do not add new heuristics unless a concrete reproducible defect is found or authoritative missing input changes the model.
+
+
+## Current-run cleanup contract
+
+- The only default output location for the canonical horizon run is `output/joint_recovery/`.
+- `scripts/run_joint_recovery_horizons.py` replaces this dedicated output directory at startup, then writes each requested horizon and one aggregate `horizon_summary.json`.
+- `scripts/run_disruption_recovery.py` similarly replaces its selected dedicated `--output-dir` before generating trials and selected results.
+- Output cleanup refuses the repository root, the shared `output/` parent, and paths outside `output/`. It does not touch `originals/`, `input/`, code, tests, docs, logs, or historical experiment files elsewhere under `output/`.
+- Old committed files elsewhere under `output/`, `logs/`, and `patches/` remain historical evidence; they are not the latest run. They were not deleted by this cleanup change. Do not add new historical output files to Git.
+- To run just one horizon, pass e.g. `--horizons 1W`; that still replaces the canonical output directory, by design. The aggregate summary then describes only the requested horizons.

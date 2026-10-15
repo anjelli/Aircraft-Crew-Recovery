@@ -8,12 +8,22 @@ A reproducible research prototype for crew-pairing and aircraft-line recovery ac
 
 Use Python 3.11 from the repository root:
 
-    python -m pip install -r requirements.txt
-    python setup_workspace.py
-    python -m pytest -q tests
-    python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
+```powershell
+python -m pip install -r requirements.txt
+python setup_workspace.py
+python -m pytest -q tests
+python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
+```
 
-The canonical runner exports 1W (25–31 Oct 2026), 1M (25 Oct–24 Nov 2026), and 154D (25 Oct 2026–27 Mar 2027) to output/joint_recovery/. Each horizon summary includes an `objective_ledger` that separates the native solver's objective from operational cost terms that remain unintegrated. Each run also writes `schedule_reconciliation.csv`, comparing original schedule values, disruption-adjusted values, and recovered decisions; this checks output consistency and does not certify full operational feasibility. Those run-specific outputs are regenerated locally and are not committed. For an actual disruption experiment with bounded retiming selection, use the command below rather than an empty baseline scenario.
+**Every canonical horizon-run invocation replaces `output/joint_recovery/` before it starts.** The current run writes only the selected 1W, 1M and/or 154D folders plus `horizon_summary.json` inside that directory. Old contents of this canonical run directory are removed automatically, so outputs from different invocations are not mixed. Do not point `--output-root` at the repository root or at `output/`; only a dedicated subdirectory under `output/` is accepted.
+
+For a disruption-retiming experiment, use a dedicated output folder; the runner now also clears that folder at startup:
+
+```powershell
+python scripts/run_disruption_recovery.py --scenario-file scenarios/demo_disruption_1w.json --output-dir output/disruption_demo --max-retimed-flights 2 --retime-options=0,5,10,15 --time-limit-seconds 30 --require-positive-retiming --require-cancellation-improvement
+```
+
+The disruption runner records trial-level evidence under that folder and publishes the selected result under `recovered_schedule/`. The entire selected output folder is regenerated on each invocation.
 
 ## Verified recovery snapshot
 
