@@ -69,14 +69,15 @@ The values below come from saved logs, not a new optimizer run. The objective de
 
 The factor M = active flights + 1 is 812 for the week and 18,902 for the full schedule. The recomputed objective matches the saved reported objective in both logs. The historical full-horizon log says 166 days, but 25 Oct 2026 to 28 Mar 2027 inclusive is 155 days.
 
-| Requested operational component | Existing coverage-only baseline | Four-term operational objective |
+| Objective component | Historical coverage-only MIP | Current joint recovery prototype |
 |---|---|---|
-| Cancellation / revenue | Not modeled | BLOCKED — NOT RUN |
-| Retiming magnitude | Not modeled in MIP objective | BLOCKED — NOT RUN |
-| Unused FDP / crew-string efficiency | Not modeled | BLOCKED — NOT RUN |
-| Distinct crew-set count | Not modeled; pairing count is not crew-set count | BLOCKED — NOT RUN |
+| Cancellation count | Uncovered-flight slack was penalized; slack was not an explicit cancellation decision | Active: minimize the number of cancelled eligible flights |
+| Absolute retiming | Not modelled | Not integrated: current joint prototype is operate/cancel only |
+| Approved operating cost | Pairing count, not a full operating-cost model | Partial proxy: selected pairing cost plus aircraft-start cost; not the full approved operating cost |
+| Crew-efficiency cost | Not modelled | Not integrated; no matching decision variables |
+| Distinct crew-set count | Not modelled; pairing count is not crew-set count | Not integrated; individual crew-roster/set variables are absent |
 
-There is no defensible operational objective value or cost delta until the real solver and decision variables are supplied. Operational component costs are blank, not zero.
+The run-level `objective_ledger` reports cancellation count and the current partial secondary-cost components for each completed solve. It records unsupported operational values as null, not zero. A complete operational objective value or cost delta cannot be claimed until the required decision variables, cost units, data joins and owner-approved priorities are integrated.
 
 ## Reproduction
 
