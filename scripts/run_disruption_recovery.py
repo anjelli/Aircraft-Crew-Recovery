@@ -275,6 +275,10 @@ def main() -> int:
         help="Fail unless the selected recovered schedule retimes at least one operated flight; useful for end-to-end scenario tests.",
     )
     parser.add_argument(
+        "--require-cancellation-improvement", action="store_true",
+        help="Fail unless the selected retiming combination cancels fewer flights than the all-zero retiming trial.",
+    )
+    parser.add_argument(
         "--retime-options",
         default="0,5,10,15",
         help="Comma-separated candidate offsets (minutes) relative to the disruption-adjusted times.",
@@ -319,74 +323,215 @@ def main() -> int:
     candidate_flights = _discover_retiming_flights(
         delayed_flights, delay_by_flight, start_date=args.start_date, days=args.days
     )[:args.max_retimed_flights]
+    if not candidate_flights:
+        parser.error(
+            "No downstream flights found in the disrupted flights' crew pairings, provisional routes, "
+            "or nearby connection window; cannot search meaningful retiming alternatives."
+        )
+    combination_count = len(options) ** len(candidate_flights)
+    if combination_count > 256:
+        parser.error(
+            f"Search would require {combination_count} full recovery runs. "
+            "Reduce --max-retimed-flights or --retime-options; the safety cap is 256 combinations."
+        )
+
     output_root = args.output_dir.expanduser().resolve()
     trial_root = output_root / "trials"
     manifest_root = output_root / "trial_manifests"
     trial_root.mkdir(parents=True, exist_ok=True)
     manifest_root.mkdir(parents=True, exist_ok=True)
 
-    fixed_offsets: dict[str, int] = {}
     trial_records: list[dict[str, Any]] = []
-    selected_summary: dict[str, Any] | None = None
-    selected_trial_path: Path | None = None
-    selected_manifest: dict[str, Any] | None = None
-
-    for iteration, flight_id in enumerate(candidate_flights, start=1):
-        candidates: list[tuple[tuple[float, float, float], int, Path, dict[str, Any], dict[str, Any]]] = []
-        valid_offsets = [
-            offset for offset in options
-            if delay_by_flight.get(flight_id, 0) + offset >= 0
+    successful_trials: list[dict[str, Any]] = []
+    for trial_index, offset_tuple in enumerate(
+        product(options, repeat=len(candidate_flights)), start=1
+    ):
+        offsets_by_flight = {
+            flight_id: int(offset)
+            for flight_id, offset in zip(candidate_flights, offset_tuple)
+        }
+        manifest = _trial_manifest(base, offsets_by_flight, trial_index)
+        parts = [
+            f"{''.join(ch if ch.isalnum() or ch in '-_' else '_' for ch in flight_id)}_{offset:+d}"
+            for flight_id, offset in sorted(offsets_by_flight.items())
         ]
-        if len(valid_offsets) < 2:
-            raise RuntimeError(
-                f"Fewer than two feasible retiming offsets remain for {flight_id}; "
-                "each recovered departure must not precede the source schedule."
-            )
-        for offset in valid_offsets:
-            manifest = _trial_manifest(base, fixed_offsets, flight_id, offset, iteration)
-            safe_flight = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in flight_id)
-            label = f"{iteration:02d}_{safe_flight}_{offset:+d}m"
-            manifest_path = manifest_root / f"{label}.json"
-            out_path = trial_root / label
-            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-            rc, summary, error = _run_trial(
-                scenario_path=manifest_path,
-                output_path=out_path,
-                start_date=args.start_date,
-                days=args.days,
-                time_limit_seconds=args.time_limit_seconds,
-                pairing_mode=args.pairing_mode,
-            )
-            score = _score(summary) if rc == 0 else (math.inf, math.inf, math.inf)
-            record = {
-                "flight_id": flight_id,
-                "offset_minutes": offset,
-                "status": summary.get("status", "RUNNER_FAILED") if summary else "RUNNER_FAILED",
-                "cancelled_flights": summary.get("cancelled_flights"),
-                "operated_flights": summary.get("operated_flights"),
-                "total_absolute_retiming_minutes": (
-                    (summary.get("schedule_reconciliation") or {}).get("total_absolute_retiming_minutes")
-                ),
-                "secondary_objective": summary.get("secondary_objective"),
-                "score_lexicographic": list(score),
-                "output_dir": str(out_path),
-                "error": error or None,
-            }
-            trial_records.append(record)
-            if rc == 0:
-                candidates.append((score, offset, out_path, summary, manifest))
-        if not candidates:
-            raise RuntimeError(
-                f"Every retiming candidate failed for flight {flight_id}. "
-                "Inspect trial_manifests and trial output summaries under "
-                f"{output_root}."
-            )
-        # Cancellation count first, then absolute selected retiming, then the
-        # native solver's partial cost proxy. This is only over this finite grid.
-        score, offset, selected_trial_path, selected_summary, selected_manifest = min(
-            candidates, key=lambda item: (item[0], abs(item[1]), item[1])
+        label = f"trial_{trial_index:03d}_" + "_".join(parts) + "m"
+        manifest_path = manifest_root / f"{label}.json"
+        out_path = trial_root / label
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        rc, summary, error = _run_trial(
+            scenario_path=manifest_path,
+            output_path=out_path,
+            start_date=args.start_date,
+            days=args.days,
+            time_limit_seconds=args.time_limit_seconds,
+            pairing_mode=args.pairing_mode,
         )
-        fixed_offsets[flight_id] = offset
+        score = _score(summary) if rc == 0 else (math.inf, math.inf, math.inf)
+        record = {
+            "trial_index": trial_index,
+            "offsets_by_flight": offsets_by_flight,
+            "status": summary.get("status", "RUNNER_FAILED") if summary else "RUNNER_FAILED",
+            "cancelled_flights": summary.get("cancelled_flights"),
+            "operated_flights": summary.get("operated_flights"),
+            "total_absolute_retiming_minutes": (
+                (summary.get("schedule_reconciliation") or {}).get("total_absolute_retiming_minutes")
+            ),
+            "secondary_objective": summary.get("secondary_objective"),
+            "score_lexicographic": list(score),
+            "output_dir": str(out_path),
+            "error": error or None,
+        }
+        trial_records.append(record)
+        if rc == 0:
+            successful_trials.append({
+                "record": record,
+                "score": score,
+                "offset_magnitude": sum(abs(value) for value in offsets_by_flight.values()),
+                "offset_tuple": tuple(offsets_by_flight[fid] for fid in candidate_flights),
+                "output_path": out_path,
+                "summary": summary,
+                "manifest": manifest,
+            })
+
+    if not successful_trials:
+        report = {
+            "status": "FAILED_NO_SUCCESSFUL_TRIALS",
+            "base_scenario_id": loaded.scenario_id,
+            "start_date": args.start_date,
+            "days": args.days,
+            "retimed_flights_considered": candidate_flights,
+            "candidate_offsets_minutes": options,
+            "trials": trial_records,
+            "global_optimum_claimed": False,
+        }
+        (output_root / "search_summary.json").write_text(
+            json.dumps(report, indent=2) + "\n", encoding="utf-8"
+        )
+        print(json.dumps(report, indent=2))
+        return 1
+
+    # Pick across *joint* offset combinations, not one flight at a time. A
+    # middle-flight offset can repair its predecessor connection but break the
+    # next connection; evaluating the Cartesian product lets both be shifted
+    # together. The all-zero combination is retained as the disruption-only
+    # comparator.
+    selected_trial = min(
+        successful_trials,
+        key=lambda trial: (
+            trial["score"],
+            trial["offset_magnitude"],
+            trial["offset_tuple"],
+        ),
+    )
+    selected_record = selected_trial["record"]
+    selected_summary = selected_trial["summary"]
+    selected_trial_path = selected_trial["output_path"]
+    selected_manifest = selected_trial["manifest"]
+    selected_offsets = dict(selected_trial["record"]["offsets_by_flight"])
+    baseline_record = next(
+        (
+            trial["record"] for trial in successful_trials
+            if all(value == 0 for value in trial["record"]["offsets_by_flight"].values())
+        ),
+        None,
+    )
+
+    recovered_path = output_root / "recovered_schedule"
+    if recovered_path.exists():
+        shutil.rmtree(recovered_path)
+    shutil.copytree(selected_trial_path, recovered_path)
+
+    final_manifest_path = output_root / "selected_scenario.json"
+    final_manifest_path.write_text(json.dumps(selected_manifest, indent=2) + "\n", encoding="utf-8")
+    final_summary_path = recovered_path / "summary.json"
+    final_summary = json.loads(final_summary_path.read_text(encoding="utf-8"))
+    if isinstance(final_summary.get("scenario"), dict):
+        final_summary["scenario"]["source_path"] = str(final_manifest_path)
+    final_summary["retiming_search"] = {
+        "status": "COMPLETED_JOINT_FINITE_GRID_SEARCH",
+        "method": (
+            "Joint finite-grid search over downstream-flight offsets; each combination re-runs "
+            "pairing validation, the recovery solver, and post-solve audits."
+        ),
+        "global_optimum_claimed": False,
+        "ranking": [
+            "minimize cancelled flights",
+            "minimize total absolute selected retiming minutes among operated flights",
+            "minimize the solver's partial pairing-plus-aircraft-start cost proxy",
+        ],
+        "candidate_offsets_minutes": options,
+        "searched_flight_ids": candidate_flights,
+        "selected_offsets_minutes": selected_offsets,
+        "disruption_only_baseline": baseline_record,
+        "selected_trial": selected_record,
+        "trials": trial_records,
+        "selected_output_dir": str(recovered_path),
+        "limitations": [
+            "Search is restricted to the configured offset grid and the downstream flights considered by --max-retimed-flights.",
+            "The underlying solver still uses provisional LINE_n aircraft resources when aircraft_inventory.csv is absent.",
+            "The five-term owner-approved objective and global pairing-column generation are not fully integrated.",
+        ],
+    }
+    final_summary_path.write_text(json.dumps(final_summary, indent=2) + "\n", encoding="utf-8")
+    copied_manifest = recovered_path / "scenario_manifest.json"
+    copied_manifest.write_text(
+        json.dumps(json.loads(final_manifest_path.read_text(encoding="utf-8")), indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    retimed_count = int(
+        (final_summary.get("schedule_reconciliation") or {}).get(
+            "operated_flights_retimed_after_scenario", 0
+        )
+    )
+    baseline_cancellations = (
+        baseline_record.get("cancelled_flights") if baseline_record else None
+    )
+    selected_cancellations = final_summary.get("cancelled_flights")
+    positive_retiming_ok = not args.require_positive_retiming or retimed_count >= 1
+    cancellation_improvement_ok = (
+        not args.require_cancellation_improvement
+        or (
+            baseline_cancellations is not None
+            and selected_cancellations is not None
+            and int(selected_cancellations) < int(baseline_cancellations)
+        )
+    )
+    overall_status = (
+        "COMPLETED_JOINT_FINITE_GRID_SEARCH"
+        if positive_retiming_ok and cancellation_improvement_ok
+        else "FAILED_EXPECTED_RECOVERY_IMPROVEMENT_NOT_FOUND"
+    )
+    report = {
+        "status": overall_status,
+        "base_scenario_id": loaded.scenario_id,
+        "start_date": args.start_date,
+        "days": args.days,
+        "retimed_flights_considered": candidate_flights,
+        "candidate_offsets_minutes": options,
+        "selected_offsets_minutes": selected_offsets,
+        "selected_score": list(_score(final_summary)),
+        "selected_recovered_flights": final_summary.get("operated_flights"),
+        "selected_cancelled_flights": selected_cancellations,
+        "disruption_only_cancelled_flights": baseline_cancellations,
+        "cancellation_improvement": (
+            int(baseline_cancellations) - int(selected_cancellations)
+            if baseline_cancellations is not None and selected_cancellations is not None
+            else None
+        ),
+        "selected_retimed_flights": retimed_count,
+        "recovered_schedule_dir": str(recovered_path),
+        "trial_count": len(trial_records),
+        "successful_trial_count": len(successful_trials),
+        "trials": trial_records,
+        "global_optimum_claimed": False,
+    }
+    (output_root / "search_summary.json").write_text(
+        json.dumps(report, indent=2) + "\n", encoding="utf-8"
+    )
+    print(json.dumps(report, indent=2))
+    return 0 if overall_status == "COMPLETED_JOINT_FINITE_GRID_SEARCH" else 1
 
     assert selected_summary is not None and selected_trial_path is not None and selected_manifest is not None
     recovered_path = output_root / "recovered_schedule"
