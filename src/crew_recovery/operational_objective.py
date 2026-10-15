@@ -98,6 +98,11 @@ def objective_contract(
         "policy": "lexicographic",
         "policy_status": "PROPOSED_PENDING_OWNER_APPROVAL",
         "priority_order": list(OBJECTIVE_ORDER),
+        # Preserve pre-ledger keys for existing callers while making the richer
+        # per-term status list the canonical interface.
+        "retiming_term_active": bool(retiming_integrated),
+        "crew_efficiency_term_active": bool(crew_efficiency_integrated),
+        "distinct_crew_set_term_active": bool(crew_roster_integrated),
         "objective_labels": dict(_OBJECTIVE_LABELS),
         "terms": [
             {
