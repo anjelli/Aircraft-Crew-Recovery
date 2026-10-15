@@ -4,55 +4,73 @@ This document distinguishes the canonical recovery path from older research and 
 
 ## Canonical recovery execution
 
-1. setup_workspace.py checks that required files exist under originals/ and invokes scripts/prep_inputs.py.
-2. scripts/prep_inputs.py prepares the schedule and pairing report under input/; exact duplicate schedule rows are recorded under output/audit/.
-3. scripts/run_joint_recovery_horizons.py invokes scripts/run_one_week_joint_recovery.py for each requested horizon and aggregates the individual summaries.
-4. Each single-horizon run resolves MGT, optionally applies a versioned scenario, validates existing pairing-report columns, optionally generates bounded extra pairing candidates, loads aircraft resources, and runs the joint operate/cancel recovery method.
-5. Each run performs post-solve aircraft/crew checks and exports decisions, pairings, rotations, validation reports, and a per-flight schedule reconciliation. The schedule reconciliation checks that operated-flight times match the scenario schedule; it is not a full operational-feasibility certificate.
-6. scripts/audit_aircraft_line_baseline.py independently audits the supplied AIRFLITE line plan; it does not validate the optimized recovery plan.
-7. The workflow in .github/workflows/tests.yml runs preparation, the regression suite, the aircraft-line baseline audit, the three-horizon runner, and artifact upload.
+1. `setup_workspace.py` checks source inputs under `originals/` and invokes `scripts/prep_inputs.py`.
+2. `scripts/prep_inputs.py` writes `input/schedule.xlsx` and `input/pairing_report.xlsx`; exact duplicate schedule rows are recorded under `output/audit/`.
+3. `scripts/run_joint_recovery_horizons.py` invokes `scripts/run_one_week_joint_recovery.py` for each requested horizon and aggregates each run's summary.
+4. The single-horizon runner prepares the schedule and resolves MGT, applies optional versioned scenario events, validates the supplied pairing report, optionally adds bounded generated candidates, loads aircraft resources, and runs operate/cancel recovery.
+5. Each run checks aircraft routes, crew coverage, and schedule reconciliation. It exports per-flight decisions, selected pairings, aircraft rotations, validation reports, `schedule_reconciliation.csv`, an Excel workbook, and `summary.json`.
+6. The multi-horizon runner carries each horizon's objective ledger and schedule-reconciliation summary into `horizon_summary.json`.
+7. `scripts/audit_aircraft_line_baseline.py` independently audits the supplied AIRFLITE line plan. It is separate from validation of the newly recovered plan.
 
 ## Current architecture
 
 ```mermaid
 flowchart TD
-    SRC_SCH["Source schedule"] --> PREP["Prepare canonical inputs"]
-    SRC_REP["Source pairing report"] --> PREP
-    PREP --> SCH["Prepared schedule"]
-    PREP --> REP["Prepared pairing report"]
+  subgraph INPUTS["Inputs and preparation"]
+    S0["originals/schedule_kgp.xlsx"] --> PREP["scripts/prep_inputs.py"]
+    P0["originals/pairing_report.xlsx"] --> PREP
+    PREP --> SCH["input/schedule.xlsx"]
+    PREP --> REP["input/pairing_report.xlsx"]
+    RULES["originals/MGT.xlsx"]
+    LINES["originals/low_kgp"]
+  end
 
-    HORIZONS["Multi-horizon runner"] --> RUN["Single-horizon runner"]
-    SCH --> RUN
-    MGT["MGT rules"] --> RUN
-    SCENARIO["Optional disruption scenario"] -.-> RUN
-
-    RUN --> ACTIVE["Apply scenario, resolve MGT, select eligible flights"]
-    ACTIVE --> PAIR_CHECK["Validate existing pairings"]
-    REP --> PAIR_CHECK
-    PAIR_CHECK --> EXISTING["Existing validated candidates"]
-    ACTIVE -.-> PRICER["Optional bounded candidate generation"]
+  subgraph ACTIVE["Active recovery pipeline"]
+    H["Multi-horizon runner"] --> R["Single-horizon runner"]
+    SCH --> R
+    RULES --> R
+    SCENARIO["Optional disruption scenario"] -.-> R
+    R --> ACTIVE_FLIGHTS["Prepare schedule, apply scenario,<br/>resolve MGT, select eligible flights"]
+    ACTIVE_FLIGHTS --> VALIDATE["Validate existing pairings"]
+    REP --> VALIDATE
+    VALIDATE --> EXISTING["Existing validated candidates"]
+    EXISTING -.-> PRICER["Optional bounded candidate generation"]
     EXISTING --> POOL["Candidate pool"]
     PRICER -.-> POOL
 
-    LINES["AIRFLITE lines of work"] --> RESOURCES["Load aircraft resources"]
+    LINES --> RESOURCES["Load aircraft resources"]
+    SCH --> RESOURCES
     INVENTORY["Optional verified aircraft inventory"] --> RESOURCES
     SCENARIO -.-> RESOURCES
-    ACTIVE --> SOLVE["Recovery selection"]
+    ACTIVE_FLIGHTS --> SOLVE["Recovery selection<br/>1W: joint MILP<br/>1M / 154D: heuristic"]
     POOL --> SOLVE
     RESOURCES --> SOLVE
-    SOLVE --> CHECKS["Aircraft, crew, schedule-reconciliation checks"]
-    CHECKS --> OUTPUTS["Flight decisions, pairings, rotations, reports"]
-    OUTPUTS --> AGG["Aggregate horizon summary"]
+    SOLVE --> CHECKS["Aircraft, crew, and schedule-reconciliation checks"]
+    CHECKS --> OUTPUTS["Per-horizon exports and summary"]
+    OUTPUTS --> AGG["Aggregate horizon_summary.json"]
+  end
 
-    SCH --> AUDIT["Independent audit of supplied line plan"]
-    MGT --> AUDIT
-    LINES --> AUDIT
-    AUDIT --> AUDIT_RESULT["Baseline line-audit report"]
+  subgraph AUDIT["Independent baseline audit"]
+    BASE_AUDIT["audit_aircraft_line_baseline.py"]
+    AUDIT_OUT["Baseline line-audit report"]
+    SCH --> BASE_AUDIT
+    RULES --> BASE_AUDIT
+    LINES --> BASE_AUDIT
+    BASE_AUDIT --> AUDIT_OUT
+  end
+
+  subgraph RESEARCH["Separate coverage-LP research path"]
+    BUILDER["Pairing builder utilities"]
+    ADAPTER["pairing_columns.py"]
+    CG["column_generation.py +<br/>integrated_column_generation.py"]
+    BUILDER -.-> ADAPTER
+    ADAPTER -.-> CG
+  end
 ```
 
-The one-week horizon uses the joint MILP; larger horizons use the deterministic coverage-first heuristic. The recovery method minimizes cancellations first and then uses the currently supported pairing and aircraft-start cost terms. The model does not optimize retiming, and AIRFLITE `LINE_n` resources are provisional when verified aircraft inventory is absent.
+The coverage-LP/master-pricing loop is deliberately shown as a separate research path. The canonical horizon runner does not invoke it, and it does not receive dual prices from the joint aircraft-and-crew recovery model.
 
-The coverage-LP/master-pricing loop in `integrated_column_generation.py` is a separate research path. It is not invoked by the canonical horizon runner and does not receive dual prices from the joint aircraft-and-crew recovery model. Do not draw it as a connected optimization stage in this current-implementation diagram.
+The one-week horizon uses the joint MILP; larger horizons use the deterministic coverage-first heuristic. The current objective minimizes cancellations first and then uses the supported pairing and aircraft-start cost terms. Retiming is not optimized. When approved aircraft inventory is absent, AIRFLITE `LINE_n` resources remain provisional. The schedule-reconciliation audit checks output consistency; it is not a complete operational-feasibility certificate.
 
 ## Reusable implementation: src/crew_recovery/
 
@@ -90,7 +108,7 @@ The coverage-LP/master-pricing loop in `integrated_column_generation.py` is a se
 
 ## Tests and automation
 
-The tests/ folder covers pairing legality, MGT effective dates, aircraft resource/route behavior, objective contracts, recovery selection, independent audit logic, pricing, and historical experiment helpers. The GitHub workflow runs the full suite before producing the recovery artifact.
+The tests/ folder covers pairing legality, MGT effective dates, aircraft resource/route behavior, objective contracts, recovery selection, independent audit logic, pricing, schedule reconciliation, aggregate horizon reporting, and historical experiment helpers. The GitHub workflow runs the full suite before producing the recovery artifact.
 
 ## Canonical files and legacy files
 
