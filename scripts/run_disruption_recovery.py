@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Bounded disruption-recovery search over explicit flight-retiming alternatives.
 
-For each delayed flight and nearby downstream connections, try a finite grid
-of retiming offsets and re-run the normal one-week recovery pipeline. Alternatives
-are ranked lexicographically by cancelled flights, absolute recovery retiming,
-then the solver's supported partial cost proxy. This is a bounded coordinate
-search, not a global optimum or a full operational approval.
+For a disrupted flight and its downstream crew-pairing connections, evaluate
+the Cartesian product of configured retiming offsets and re-run the one-week
+recovery pipeline for each combination. Alternatives are ranked by cancellations,
+absolute recovery retiming, then the solver's supported partial cost proxy.
+This finite-grid search is not a global optimum or operational approval.
 """
 from __future__ import annotations
 
