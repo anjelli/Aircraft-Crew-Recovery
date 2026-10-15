@@ -21,14 +21,14 @@ The run-pinned metrics, schedule reconciliation findings, heuristic comparison, 
 
 ## Disruption recovery with bounded retiming search
 
-First prepare the workspace, then run the checked-in non-empty 60-minute delay experiment:
+First prepare the workspace, then run the checked-in non-empty 20-minute delay experiment on flight 485 (IPH–SIN). The search considers downstream pairing flights 486 and 487:
 
 ```powershell
 python setup_workspace.py
-python scripts/run_disruption_recovery.py --scenario-file scenarios/demo_disruption_1w.json --output-dir output/disruption_demo --max-retimed-flights 2 --retime-options=0,5,10 --time-limit-seconds 10 --require-positive-retiming
+python scripts/run_disruption_recovery.py --scenario-file scenarios/demo_disruption_1w.json --output-dir output/disruption_demo --max-retimed-flights 2 --retime-options=0,5,10,15 --time-limit-seconds 30 --require-positive-retiming --require-cancellation-improvement
 ```
 
-The script applies the disruption, discovers nearby downstream flights, tries the configured offset grid, reruns pairing validation and the recovery solve for each candidate, and keeps the best candidate using this order: cancelled flights, total absolute selected retiming among operated flights, then the native solver's partial pairing-plus-aircraft-start cost. It exports the selected run to `output/disruption_demo/recovered_schedule/`, including `flight_decisions.csv`, `aircraft_rotations.csv`, `selected_pairings.csv`, `schedule_reconciliation.csv`, `summary.json`, and `recovery_7d.xlsx`. `search_summary.json` records each trial and the chosen offsets.
+The script applies the disruption, discovers downstream flights in the affected crew pairing, evaluates joint combinations of the configured offset grid, reruns pairing validation and the recovery solve for each combination, and keeps the best candidate using this order: cancelled flights, total absolute selected retiming among operated flights, then the native solver's partial pairing-plus-aircraft-start cost. It exports the selected run to `output/disruption_demo/recovered_schedule/`, including `flight_decisions.csv`, `aircraft_rotations.csv`, `selected_pairings.csv`, `schedule_reconciliation.csv`, `summary.json`, and `recovery_7d.xlsx`. `search_summary.json` records each trial and the chosen offsets.
 
 This is a finite-grid outer-loop coordinate search, not a global joint MILP or continuous-time retiming proof. The inner solver still uses the existing validated pairing pool (or bounded generated columns in expanded mode); resource inventory and business objective limitations below still apply.
 
