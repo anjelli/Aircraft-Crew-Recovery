@@ -28,3 +28,19 @@ def test_crew_efficiency_requires_owner_confirmed_units():
 def test_component_ledger_validation():
  x={t:0. for t in OBJECTIVE_TERMS};assert validate_component_values(x)==x;x["crew_set_count"]=-1
  with pytest.raises(ObjectiveConfigurationError,match="finite and nonnegative"):validate_component_values(x)
+
+
+
+def test_legacy_objective_spec_contract_points_to_canonical_run_policy():
+    from objective_spec import objective_contract
+    contract = objective_contract()
+    assert contract["priority_order"] == [
+        "cancellation_count",
+        "total_absolute_retiming_minutes",
+        "approved_operating_cost",
+        "crew_efficiency_cost",
+        "distinct_crew_set_count",
+    ]
+    assert contract["legacy_cost_component_helpers"]["status"] == (
+        "COMPATIBILITY_API_NOT_USED_AS_ACTIVE_SOLVER_POLICY"
+    )

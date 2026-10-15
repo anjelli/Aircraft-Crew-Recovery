@@ -1,6 +1,6 @@
 import pytest
 
-from crew_recovery.operational_objective import ObjectiveComponents, objective_contract, objective_key
+from crew_recovery.operational_objective import (\n    ObjectiveComponents, objective_contract, objective_key, current_recovery_objective_ledger,\n)
 
 
 def test_objective_is_lexicographic_cancellation_first():
@@ -24,3 +24,42 @@ def test_inactive_objective_terms_are_not_claimed_as_integrated():
 def test_objective_rejects_negative_components():
     with pytest.raises(ValueError):
         objective_key(ObjectiveComponents(0, -5, 10))
+
+
+
+def test_contract_distinguishes_active_partial_and_unintegrated_terms():
+    contract = objective_contract()
+    assert contract["policy_status"] == "PROPOSED_PENDING_OWNER_APPROVAL"
+    status_by_term = {term["name"]: term["implementation_status"] for term in contract["terms"]}
+    assert status_by_term["cancellation_count"] == "active"
+    assert status_by_term["approved_operating_cost"] == "partial_proxy_selected_pairing_cost_plus_aircraft_start_cost"
+    assert status_by_term["total_absolute_retiming_minutes"] == "not_integrated"
+    assert contract["inactive_terms_are_not_zero"] is True
+
+
+def test_current_objective_ledger_reports_null_for_unintegrated_terms():
+    ledger = current_recovery_objective_ledger(
+        cancellation_count=3,
+        selected_pairing_cost=1250.0,
+        aircraft_start_cost=50.0,
+        solver_status="FEASIBLE_NOT_PROVEN_OPTIMAL",
+        solver_reported_secondary_objective=1300.0,
+    )
+    assert ledger["implemented_stages"][0]["value"] == 3
+    assert ledger["implemented_stages"][1]["value"] == 1300.0
+    assert ledger["implemented_stages"][1]["values_reconcile"] is True
+    terms = {term["name"]: term for term in ledger["operational_terms"]}
+    assert terms["approved_operating_cost"]["status"] == "partial_proxy"
+    assert terms["total_absolute_retiming_minutes"]["value"] is None
+    assert terms["crew_efficiency_cost"]["value"] is None
+    assert terms["distinct_crew_set_count"]["value"] is None
+
+
+def test_current_objective_ledger_rejects_invalid_cost_values():
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        current_recovery_objective_ledger(
+            cancellation_count=0,
+            selected_pairing_cost=float("nan"),
+            aircraft_start_cost=0.0,
+            solver_status="test",
+        )

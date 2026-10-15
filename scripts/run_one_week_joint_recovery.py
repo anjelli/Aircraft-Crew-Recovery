@@ -36,7 +36,7 @@ from crew_recovery.independent_validator import (
 from crew_recovery.resource_constrained_pricing import ResourceConstrainedPairingPricer
 from crew_recovery.crew_costing import crew_salary_cost, generated_pairing_cost_callback
 from crew_recovery.pairing_scoring import pairing_efficiency_score
-from crew_recovery.operational_objective import objective_contract
+from crew_recovery.operational_objective import objective_contract, current_recovery_objective_ledger
 from crew_recovery.objective_spec import load_cost_parameters
 from crew_recovery.joint_recovery import solve_joint_operate_cancel, solve_joint_operate_cancel_greedy
 from crew_recovery.project_paths import input_file, original_file
@@ -122,7 +122,7 @@ def main() -> int:
         "equipment_in_scope": ["320", "32N", "32P", "32Q"],
         "retiming_supported": False,
         "objective_policy": ["minimize_cancellations", "minimize_midnight_aware_crew_salary_plus_aircraft_start_cost"],
-        "objective_contract": objective_contract(retiming_integrated=False, crew_roster_integrated=False),
+        "objective_contract": objective_contract(retiming_integrated=False, crew_efficiency_integrated=False, crew_roster_integrated=False),\n        "objective_ledger": {\n            "status": "NOT_RUN",\n            "note": "Objective values are populated only after the recovery solver returns a plan.",\n        },
         "objective_cost_basis": "Crew salary uses cost_parameters.csv man_day_cost multiplied by each duty calendar day touched, including the second day when duty crosses midnight; other allowances and retiming are not yet integrated.",
         "candidate_ranking": "Salary cost per covered sector, then duty count; ordering only, every legal generated column is retained. This is a heuristic baseline, not trained ML.",
         "aircraft_resources_are_provisional": True,
@@ -467,6 +467,23 @@ def main() -> int:
         if not missing_mgt.empty and summary["status"] != "BLOCKED_POST_SOLVE_VALIDATION_FAILED":
             summary["status_before_unresolved_mgt"] = summary["status"]
             summary["status"] = "PARTIAL_RECOVERY_UNRESOLVED_MGT"
+
+        selected_column_by_id = {column.column_id: column for column in candidate_columns}
+        selected_pairing_cost = sum(
+            float(selected_column_by_id[pid].cost) for pid in selected_pairings
+        )
+        aircraft_by_id = {resource.tail_id: resource for resource in aircraft}
+        used_aircraft_ids = set(result.aircraft_by_flight.values())
+        aircraft_start_cost = sum(
+            float(aircraft_by_id[tail_id].start_cost) for tail_id in used_aircraft_ids
+        )
+        summary["objective_ledger"] = current_recovery_objective_ledger(
+            cancellation_count=len(cancelled),
+            selected_pairing_cost=selected_pairing_cost,
+            aircraft_start_cost=aircraft_start_cost,
+            solver_status=summary["status"],
+            solver_reported_secondary_objective=result.secondary_objective,
+        )
         summary.update({
             "solver_mode": solver_mode,
             "active_flights": int(len(all_active)),

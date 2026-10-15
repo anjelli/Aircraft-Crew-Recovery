@@ -1,11 +1,10 @@
 # Recovery objective and unoperated-flight diagnostics
 
-## Objective hierarchy
+## Objective hierarchy and current objective ledger
 
-The current one-week joint MILP already applies a lexicographic objective:
+The canonical proposed operational priority order is maintained in `src/crew_recovery/operational_objective.py`: (1) cancellation count, (2) approved absolute retiming, (3) validated incremental operating cost, (4) validated crew-efficiency cost, and (5) distinct crew-set count. This priority order is pending owner approval and is not fully integrated.
 
-1. Minimize the number of cancellations.
-2. Fix the minimum cancellation count found by the first pass, then minimize supplied pairing salary plus aircraft-start cost.
+The current joint solver actually optimizes only two stages: minimize cancellations, then fix that count and minimize selected pairing cost plus aircraft-start cost. That secondary value is a partial cost proxy, not the full approved operating cost. Retiming, crew-efficiency cost and distinct crew-set count are not integrated; their values must be reported as null/not integrated, not zero. Each current recovery `summary.json` includes an `objective_ledger` with the active stages, component breakdown, reconciliation against the solver-reported secondary objective, and blocked terms. The four-term API in `objective_spec.py` is retained for legacy cost-helper compatibility and is not the active solver policy.
 
 The long-horizon fallback cannot prove a global optimum. It compares the prior single-pass plans with chronological ordering, bounded retries for pairings rejected before prerequisite route legs were inserted, and (where the provisional AIRFLITE mapping matches the resources) line-preferred and line-locked plans. The summary reports coverage and the number of operated flights that remain on their original provisional line.
 
