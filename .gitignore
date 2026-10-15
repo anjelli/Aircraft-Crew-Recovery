@@ -11,6 +11,12 @@ venv/
 *.egg-info/
 .DS_Store
 
-# Generated recovery runs; use the pinned CI artifact for published results
+# Current run outputs: one canonical result directory; regenerate locally
 /output/joint_recovery/
 /output/joint_recovery_expanded/
+/output/one_week_joint_recovery/
+/output/disruption_recovery/
+/output/disruption_demo/
+/output/recovery/
+
+# Historical output files are retained until explicitly archived or removed.
