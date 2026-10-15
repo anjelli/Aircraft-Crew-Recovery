@@ -4,7 +4,8 @@ import csv, math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Sequence
-# Retained for backwards-compatible cost-component utilities only; not the active solver objective.\nOBJECTIVE_TERMS=("cancellation_penalty","retiming_penalty","crew_efficiency_penalty","crew_set_count")
+# Retained for backwards-compatible cost-component utilities only; not the active solver objective.
+OBJECTIVE_TERMS=("cancellation_penalty","retiming_penalty","crew_efficiency_penalty","crew_set_count")
 DEFAULT_PRIORITY_ORDER=OBJECTIVE_TERMS
 SOURCE_COST_KEYS={"cancellation_penalty":(),"retiming_penalty":("retime_base","retiming_cost_tier_1","retiming_cost_tier_2","retiming_cost_tier_3"),
  "crew_efficiency_penalty":("unutilized_hub_time_cost_scaling","unutilized_spoke_time_cost_scaling","fdp_wasted_cost_scaling"),

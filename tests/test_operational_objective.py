@@ -1,6 +1,6 @@
 import pytest
 
-from crew_recovery.operational_objective import (\n    ObjectiveComponents, objective_contract, objective_key, current_recovery_objective_ledger,\n)
+from crew_recovery.operational_objective import ObjectiveComponents, objective_contract, objective_key, current_recovery_objective_ledger
 
 
 def test_objective_is_lexicographic_cancellation_first():
