@@ -45,6 +45,7 @@ from crew_recovery.recovery_scenario import (
     apply_flight_events,
     load_recovery_scenario,
 )
+from crew_recovery.schedule_reconciliation import build_schedule_reconciliation
 
 
 def _canonical_schedule(path: Path) -> pd.DataFrame:
@@ -501,11 +502,19 @@ def main() -> int:
             crew_coverage_errors.append("An operated flight does not have exactly one selected pairing")
         if set(decisions.loc[decisions["recovery_action"] == "OPERATE", "flight_id"]) != set(result.aircraft_by_flight):
             crew_coverage_errors.append("Operated flight set differs from aircraft-assigned flight set")
-        if aircraft_violations or crew_coverage_errors:
+        schedule_reconciliation, reconciliation_summary = build_schedule_reconciliation(decisions)
+        reconciliation_summary["output_file"] = "schedule_reconciliation.csv"
+        summary["schedule_reconciliation"] = reconciliation_summary
+        reconciliation_errors = schedule_reconciliation.loc[
+            schedule_reconciliation["consistency_status"] == "FAIL",
+            ["flight_id", "consistency_issues"],
+        ].to_dict("records")
+        if aircraft_violations or crew_coverage_errors or reconciliation_errors:
             summary["blockers"].append({
                 "code": "POST_SOLVE_VALIDATION_FAILED",
                 "aircraft_violations": aircraft_violations,
                 "crew_coverage_errors": crew_coverage_errors,
+                "schedule_reconciliation_errors": reconciliation_errors,
             })
             summary["status"] = "BLOCKED_POST_SOLVE_VALIDATION_FAILED"
         elif result.optimal_over_supplied_columns:
@@ -603,6 +612,7 @@ def main() -> int:
             "Reason codes diagnose why the selected restricted plan left a flight out; they are not proofs of global operational infeasibility. MGT_RULE_UNRESOLVED is a data blocker, not a cancellation."
         )
         decisions.to_csv(out / "flight_decisions.csv", index=False)
+        schedule_reconciliation.to_csv(out / "schedule_reconciliation.csv", index=False)
         pairing_output.to_csv(out / "selected_pairings.csv", index=False)
         rotations.to_csv(out / "aircraft_rotations.csv", index=False)
         pd.DataFrame(aircraft_violations).to_csv(out / "aircraft_validation_violations.csv", index=False)
@@ -613,6 +623,7 @@ def main() -> int:
             rotations.to_excel(writer, sheet_name="Aircraft Rotations", index=False)
             statuses.to_excel(writer, sheet_name="Pairing Validation", index=False)
             pd.DataFrame(aircraft_violations).to_excel(writer, sheet_name="Aircraft Validation", index=False)
+            schedule_reconciliation.to_excel(writer, sheet_name="Schedule Reconciliation", index=False)
             pd.DataFrame([summary]).to_excel(writer, sheet_name="Summary", index=False)
     except Exception as exc:
         summary["blockers"].append({"code": "RUNNER_EXCEPTION", "detail": f"{type(exc).__name__}: {exc}"})
