@@ -15,7 +15,7 @@ python -m pytest -q tests
 python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
 ```
 
-**Every canonical horizon-run invocation replaces `output/joint_recovery/` before it starts.** The current run writes only the selected 1W, 1M and/or 154D folders plus `horizon_summary.json` inside that directory. Old contents of this canonical run directory are removed automatically, so outputs from different invocations are not mixed. Do not point `--output-root` at the repository root or at `output/`; only a dedicated subdirectory under `output/` is accepted.
+**Each horizon-run invocation resets only the requested horizon folders and logs under `output/joint_recovery/`, then rewrites `horizon_summary.json` for that invocation.** A partial run such as `--horizons 1W` does not delete or touch the existing `1M` and `154D` folders, so it can run even when an unrelated horizon folder is locked by Windows or OneDrive. Treat `horizon_summary.json` as the record of which horizons belong to the latest invocation. Do not point `--output-root` at the repository root or at `output/`; only a dedicated output directory is accepted.
 
 For a disruption-retiming experiment, use a dedicated output folder; the runner now also clears that folder at startup:
 
