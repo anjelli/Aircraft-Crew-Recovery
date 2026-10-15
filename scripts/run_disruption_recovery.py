@@ -13,6 +13,7 @@ import argparse
 import json
 import math
 import shutil
+from itertools import product
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +29,7 @@ for path in (ROOT, SRC):
         sys.path.insert(0, str(path))
 
 from crew_recovery.aircraft_line_inputs import load_aircraft_line_inventory
+from crew_recovery.independent_validator import pairing_groups, report_flight_id
 from crew_recovery.project_paths import input_file, original_file
 from crew_recovery.recovery_scenario import load_recovery_scenario
 
@@ -56,12 +58,14 @@ def _discover_retiming_flights(
     start_date: str,
     days: int,
 ) -> list[str]:
-    """Add nearby downstream flights whose connections can be affected by a delay."""
-    schedule_path = ROOT / "input" / "schedule.xlsx"
-    if not schedule_path.is_file():
-        raise FileNotFoundError(
-            f"Prepared schedule not found at {schedule_path}; run python setup_workspace.py first."
-        )
+    """Find downstream flights coupled to disruptions by crew pairings or routes.
+
+    Pairing successors take priority over same-line or merely nearby flights,
+    because a retiming that repairs one crew duty can make its next connection
+    infeasible. The result intentionally excludes the already-disrupted flights:
+    the search chooses recovery offsets for downstream flights.
+    """
+    schedule_path = input_file("schedule.xlsx")
     frame = pd.read_excel(schedule_path)
     required = {"Day", "STD", "STA", "Flt Num", "From", "To"}
     missing = sorted(required - set(frame.columns))
@@ -81,12 +85,49 @@ def _discover_retiming_flights(
     lookup = {str(row["flight_id"]): row for row in frame.to_dict("records")}
     horizon_start = pd.Timestamp(start_date).normalize()
     horizon_end = horizon_start + pd.Timedelta(days=days - 1)
-    ordered = list(delayed_flights)
+    delayed = set(delayed_flights)
+    ordered: list[str] = []
 
-    # Prefer the actual next flight in the supplied AIRFLITE line-of-work for
-    # the disrupted flight. This is still provisional line data, not a verified
-    # tail inventory, but it makes a recovery test target the connection most
-    # directly affected by the disruption instead of an unrelated nearby flight.
+    for flight_id in delayed_flights:
+        if flight_id not in lookup:
+            raise ValueError(f"Disrupted flight_id {flight_id!r} is not in the prepared schedule")
+
+    # First collect later flights in the same supplied crew pairing. This matters
+    # where retiming a middle sector can create a second downstream MGT conflict.
+    pairing_report_path = input_file("pairing_report.xlsx")
+    report = pd.read_excel(pairing_report_path)
+    downstream_by_flight: dict[str, list[str]] = {}
+    for _pairing_id, group, _splits in pairing_groups(report):
+        group_ids = [report_flight_id(row) for _, row in group.iterrows()]
+        for source_id in delayed_flights:
+            if source_id not in group_ids:
+                continue
+            source = lookup[source_id]
+            source_time = pd.Timestamp(source["STD"])
+            for fid in group_ids:
+                row = lookup.get(fid)
+                if fid in delayed or row is None:
+                    continue
+                if not (horizon_start <= pd.Timestamp(row["Day"]).normalize() <= horizon_end):
+                    continue
+                if pd.Timestamp(row["STD"]) <= source_time:
+                    continue
+                downstream_by_flight.setdefault(source_id, []).append(fid)
+
+    # Order each pairing's downstream options chronologically; preserve source
+    # order when there are multiple explicit disruptions.
+    for source_id in delayed_flights:
+        candidates = sorted(
+            set(downstream_by_flight.get(source_id, [])),
+            key=lambda fid: (pd.Timestamp(lookup[fid]["STD"]), fid),
+        )
+        for fid in candidates:
+            if fid not in ordered:
+                ordered.append(fid)
+
+    # If pairing successors do not provide enough candidates, use later legs on
+    # the same AIRFLITE provisional line as a secondary, explicitly provisional
+    # source of route-related candidates.
     _aircraft, line_assignments = load_aircraft_line_inventory(
         original_file("low_kgp"),
         input_file("schedule.xlsx"),
@@ -104,30 +145,27 @@ def _discover_retiming_flights(
         same_line = line_assignments.loc[
             line_assignments["provisional_aircraft_id"].eq(current["provisional_aircraft_id"])
             & (line_assignments["STD"] > pd.Timestamp(current["STD"]))
-            & line_assignments["From"].astype(str).str.strip().str.upper().eq(
-                str(current["To"]).strip().upper()
-            )
             & line_assignments["STD"].dt.normalize().between(horizon_start, horizon_end)
         ].sort_values(["STD", "flight_id"])
-        for row in same_line.head(2).to_dict("records"):
+        for row in same_line.to_dict("records"):
             fid = str(row["flight_id"])
-            if fid not in ordered:
+            if fid not in delayed and fid not in ordered:
                 ordered.append(fid)
 
-    # If line reconciliation does not identify a downstream leg, use nearby
-    # scheduled flights from the delayed flight's arrival station as fallbacks.
-    candidates: list[tuple[float, str]] = []
+    # Last resort: consider flights departing from the disrupted flight's
+    # arrival station near the delayed arrival time.
+    fallback: list[tuple[float, str]] = []
     for flight_id in delayed_flights:
-        row = lookup.get(flight_id)
-        if row is None:
-            raise ValueError(f"Disrupted flight_id {flight_id!r} is not in the prepared schedule")
+        row = lookup[flight_id]
         target_station = row["To_key"]
-        impacted_arrival = pd.Timestamp(row["STA"]) + pd.Timedelta(minutes=delay_by_flight.get(flight_id, 0))
+        impacted_arrival = pd.Timestamp(row["STA"]) + pd.Timedelta(
+            minutes=delay_by_flight.get(flight_id, 0)
+        )
         low = pd.Timestamp(row["STA"]) - pd.Timedelta(hours=3)
         high = impacted_arrival + pd.Timedelta(hours=3)
         peers = frame.loc[
             frame["From_key"].eq(target_station)
-            & frame["flight_id"].ne(flight_id)
+            & ~frame["flight_id"].isin(delayed)
             & frame["Day"].dt.normalize().between(horizon_start, horizon_end)
             & frame["STD"].between(low, high)
         ].copy()
@@ -136,32 +174,28 @@ def _discover_retiming_flights(
                 peers["STD"] - impacted_arrival
             ).abs().dt.total_seconds() / 60.0
             peers = peers.sort_values(["distance_minutes", "STD", "flight_id"])
-            for peer in peers.head(2).to_dict("records"):
+            for peer in peers.to_dict("records"):
                 fid = str(peer["flight_id"])
                 if fid not in ordered:
-                    candidates.append((float(peer["distance_minutes"]), fid))
-    for _distance, flight_id in sorted(candidates, key=lambda item: (item[0], item[1])):
-        if flight_id not in ordered:
-            ordered.append(flight_id)
+                    fallback.append((float(peer["distance_minutes"]), fid))
+    for _distance, fid in sorted(fallback, key=lambda item: (item[0], item[1])):
+        if fid not in ordered:
+            ordered.append(fid)
     return ordered
-
 
 def _trial_manifest(
     base: dict[str, Any],
-    fixed_offsets: dict[str, int],
-    current_flight: str,
-    current_offset: int,
-    iteration: int,
+    offsets_by_flight: dict[str, int],
+    trial_index: int,
 ) -> dict[str, Any]:
+    """Build one trial manifest containing a joint set of downstream offsets."""
     events = [
         dict(event) for event in base["events"]
         if event.get("type") != "FLIGHT_RETIME"
     ]
-    offsets = dict(fixed_offsets)
-    offsets[current_flight] = current_offset
-    for index, (flight_id, minutes) in enumerate(sorted(offsets.items()), start=1):
+    for index, (flight_id, minutes) in enumerate(sorted(offsets_by_flight.items()), start=1):
         events.append({
-            "event_id": f"recovery-retime-{iteration}-{index}",
+            "event_id": f"recovery-retime-{trial_index}-{index}",
             "type": "FLIGHT_RETIME",
             "flight_id": flight_id,
             "offset_minutes": int(minutes),
@@ -171,10 +205,11 @@ def _trial_manifest(
         "scenario_id": base["scenario_id"],
         "description": (
             str(base.get("description", "")).rstrip()
-            + " Bounded recovery-retiming trial; offsets are relative to disruption-adjusted times."
+            + " Joint bounded recovery-retiming trial; offsets are relative to disruption-adjusted times."
         ).strip(),
         "events": events,
     }
+
 
 
 def _run_trial(
