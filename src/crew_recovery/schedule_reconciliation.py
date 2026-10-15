@@ -57,12 +57,20 @@ def build_schedule_reconciliation(
     baseline_equipment = frame["baseline_Eqp"].fillna("").astype(str).str.strip()
     scenario_equipment = frame["Eqp"].fillna("").astype(str).str.strip()
     equipment_changed = baseline_equipment.ne(scenario_equipment)
+    baseline_equipment_missing = baseline_equipment.eq("")
+    scenario_equipment_missing = scenario_equipment.eq("")
     departure_shift = (scenario_std - original_std).dt.total_seconds() / 60.0
     arrival_shift = (scenario_sta - original_sta).dt.total_seconds() / 60.0
     recovered_departure_delta = (recovered_std - scenario_std).dt.total_seconds() / 60.0
     recovered_arrival_delta = (recovered_sta - scenario_sta).dt.total_seconds() / 60.0
 
-    scenario_times_changed = departure_shift.ne(0) | arrival_shift.ne(0)
+    # Invalid/missing timestamps should be reported as data errors, not counted
+    # as disruption-induced changes.
+    scenario_times_changed = (
+        departure_shift.notna() & departure_shift.ne(0)
+    ) | (
+        arrival_shift.notna() & arrival_shift.ne(0)
+    )
     scenario_changed = scenario_times_changed | equipment_changed
     operated = action.eq("OPERATE")
     cancelled = action.eq("CANCEL")
@@ -85,6 +93,10 @@ def build_schedule_reconciliation(
             issues.append("BASELINE_TIME_MISSING_OR_INVALID")
         if pd.isna(scenario_std.iloc[idx]) or pd.isna(scenario_sta.iloc[idx]):
             issues.append("SCENARIO_TIME_MISSING_OR_INVALID")
+        if baseline_equipment_missing.iloc[idx]:
+            issues.append("BASELINE_EQUIPMENT_MISSING")
+        if scenario_equipment_missing.iloc[idx]:
+            issues.append("SCENARIO_EQUIPMENT_MISSING")
 
         row_action = action.iloc[idx]
         recovered_time_present = pd.notna(recovered_std.iloc[idx]) or pd.notna(recovered_sta.iloc[idx])
