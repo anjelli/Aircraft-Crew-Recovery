@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Bounded disruption-recovery search over explicit flight-retiming alternatives.
 
-For each flight affected by a FLIGHT_DELAY event, try a finite grid of
-retiming offsets and re-run the normal one-week recovery pipeline. Alternatives
+For each delayed flight and nearby downstream connections, try a finite grid
+of retiming offsets and re-run the normal one-week recovery pipeline. Alternatives
 are ranked lexicographically by cancelled flights, absolute recovery retiming,
 then the solver's supported partial cost proxy. This is a bounded coordinate
 search, not a global optimum or a full operational approval.
@@ -200,6 +200,10 @@ def main() -> int:
     parser.add_argument("--pairing-mode", choices=("existing-only", "expanded"), default="existing-only")
     parser.add_argument("--max-retimed-flights", type=int, default=3)
     parser.add_argument(
+        "--require-positive-retiming", action="store_true",
+        help="Fail unless the selected recovered schedule retimes at least one operated flight; useful for end-to-end scenario tests.",
+    )
+    parser.add_argument(
         "--retime-options",
         default="-30,-15,0,15,30,45,60,90",
         help="Comma-separated candidate offsets (minutes) relative to the disruption-adjusted times.",
@@ -348,6 +352,15 @@ def main() -> int:
     final_summary_path.write_text(json.dumps(final_summary, indent=2) + "\n", encoding="utf-8")
     copied_manifest = recovered_path / "scenario_manifest.json"
     copied_manifest.write_text(json.dumps(final_manifest_path and json.loads(final_manifest_path.read_text(encoding="utf-8")), indent=2) + "\n", encoding="utf-8")
+    retimed_count = int((final_summary.get("schedule_reconciliation") or {}).get("operated_flights_retimed_after_scenario", 0))
+    if args.require_positive_retiming and retimed_count < 1:
+        print(json.dumps({
+            "status": "FAILED_EXPECTED_RETIMING_NOT_SELECTED",
+            "message": "The disruption run completed, but no operated flight was retimed. Inspect the trial scores and pairing/aircraft feasibility reports.",
+            "selected_offsets_minutes": fixed_offsets,
+            "recovered_schedule_dir": str(recovered_path),
+        }, indent=2))
+        return 1
     report = {
         "status": "COMPLETED_BOUNDED_COORDINATE_SEARCH",
         "base_scenario_id": loaded.scenario_id,
@@ -358,7 +371,7 @@ def main() -> int:
         "selected_score": list(_score(final_summary)),
         "selected_recovered_flights": final_summary.get("operated_flights"),
         "selected_cancelled_flights": final_summary.get("cancelled_flights"),
-        "selected_retimed_flights": (final_summary.get("schedule_reconciliation") or {}).get("operated_flights_retimed_after_scenario"),
+        "selected_retimed_flights": retimed_count,
         "recovered_schedule_dir": str(recovered_path),
         "trial_count": len(trial_records),
         "trials": trial_records,
