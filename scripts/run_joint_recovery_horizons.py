@@ -89,6 +89,8 @@ def main() -> int:
             {
                 "horizon": r.get("horizon_label"),
                 "status": r.get("status"),
+                "objective_ledger": r.get("objective_ledger"),
+                "schedule_reconciliation": r.get("schedule_reconciliation"),
                 "active_flights": r.get("active_flights"),
                 "optimization_eligible_flights": r.get("optimization_eligible_flights"),
                 "unresolved_mgt_flights": r.get("unresolved_mgt_flights", 0),
