@@ -15,7 +15,7 @@ Keep one canonical implementation path, one source-of-truth folder for supplied 
     ├── scripts/                        canonical runners, preparation and audit commands
     ├── tests/                          regression and small-instance tests
     ├── docs/                           project map, objective contract and handoff notes
-    ├── output/                         historical experiments plus ignored current run output
+    ├── output/                         local generated run output; fully ignored by Git
     ├── logs/                           historical solver logs
     └── patches/                        archived snapshots; not active modules
 
