@@ -33,6 +33,9 @@ def _reset_output(output_root: Path) -> None:
         raise ValueError(
             f"Refusing to clean the repository root or shared output directory: {output_root}"
         )
+    # The CLI may use an existing custom directory only when it is under output/.
+    # A new external path is allowed for isolated tests/sandboxes and cannot contain
+    # prior user files to be deleted.
     if allowed_parent not in output_root.parents and output_root.exists():
         raise ValueError(
             f"Refusing to clean an existing directory outside output/: {output_root}"
