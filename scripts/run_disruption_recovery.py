@@ -336,6 +336,12 @@ def main() -> int:
         )
 
     output_root = args.output_dir.expanduser().resolve()
+    # This command owns its output directory. Remove stale trials and prior selected
+    # results so that one invocation always produces one coherent run package.
+    if output_root == ROOT.resolve() or output_root == (ROOT / "output").resolve() or (ROOT / "output").resolve() not in output_root.parents:
+        parser.error(f"Refusing to clean output path outside a dedicated output subdirectory: {output_root}")
+    if output_root.exists():
+        shutil.rmtree(output_root)
     trial_root = output_root / "trials"
     manifest_root = output_root / "trial_manifests"
     trial_root.mkdir(parents=True, exist_ok=True)
