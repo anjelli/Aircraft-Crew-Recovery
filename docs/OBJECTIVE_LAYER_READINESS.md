@@ -56,7 +56,7 @@ Revenue-driven cancellation cost stays disabled until the owner confirms route c
 3. Crew efficiency: source scalers are unutilized_hub_time_cost_scaling 20, unutilized_spoke_time_cost_scaling 40, and fdp_wasted_cost_scaling 1. The current solver has no corresponding efficiency decision variables; these inputs are not used in its objective. Metric units and calculations need confirmation before integration.
 4. Distinct crew-set count: requires actual crew roster/set assignment variables. Selected pairing count is not crew-set count. `man_day_cost` 785 is loaded but is not assumed to equal cost per set.
 
-The proposed priority order follows the meeting summary—cancellations, retiming, crew efficiency, crew-set count—but is not owner-confirmed; the meeting notes flag ambiguity between the last two. Lexicographic priority is configurable; weighted mode requires four explicit nonnegative weights. No weights are invented.
+The canonical five-term priority order is cancellation count, absolute retiming, approved operating cost, crew-efficiency cost, and distinct crew-set count. It remains proposed pending owner approval. The legacy four-term `ObjectiveConfig` and weighted-mode helper remain for compatibility only; they are not wired into `joint_recovery.py` and must not be interpreted as the current run policy.
 
 ## 4. Historical coverage-only baseline (not the current joint-recovery result)
 

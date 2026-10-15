@@ -1,5 +1,5 @@
 from pathlib import Path
-from objective_layer_readiness import baseline_breakdown,calendar_days,parse_embedded_summary
+from objective_layer_readiness import baseline_breakdown,calendar_days,parse_embedded_summary,readiness_rows,CANDIDATES
 def test_true_span_is_155_not_166():
  assert calendar_days("2026-10-25","2026-10-31")==7
  assert calendar_days("2026-10-25","2027-03-28")==155
@@ -12,3 +12,30 @@ def test_saved_coverage_objective_decomposes(tmp_path:Path):
  assert bool(r["Objective Decomposition Matches"]) is True and r["True Calendar Days Inclusive"]==7
 def test_summary_embedded_after_log_line():
  assert parse_embedded_summary('log line\n{ "count": 3 }\n')=={"count":3}
+
+
+
+def test_objective_readiness_uses_canonical_five_term_contract():
+    frame = readiness_rows({
+        "retime_base": 0.0,
+        "retiming_cost_tier_1": 0.001,
+        "retiming_cost_tier_2": 0.003,
+        "retiming_cost_tier_3": 0.006,
+        "man_day_cost": 785.0,
+        "unutilized_hub_time_cost_scaling": 20.0,
+        "unutilized_spoke_time_cost_scaling": 40.0,
+        "fdp_wasted_cost_scaling": 1.0,
+    })
+    assert frame["Term"].tolist() == [
+        "cancellation_count",
+        "total_absolute_retiming_minutes",
+        "approved_operating_cost",
+        "crew_efficiency_cost",
+        "distinct_crew_set_count",
+    ]
+    assert frame.iloc[0]["Status"] == "ACTIVE"
+    assert frame.iloc[2]["Status"] == "PARTIAL_PROXY"
+
+
+def test_coverage_lp_is_not_misclassified_as_full_operational_solver():
+    assert "column_generation.py" not in CANDIDATES
