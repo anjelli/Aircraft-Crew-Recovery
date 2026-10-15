@@ -13,7 +13,7 @@ Use Python 3.11 from the repository root:
     python -m pytest -q tests
     python scripts/run_joint_recovery_horizons.py --time-limit-seconds 180
 
-The canonical runner exports 1W (25–31 Oct 2026), 1M (25 Oct–24 Nov 2026), and 154D (25 Oct 2026–27 Mar 2027) to output/joint_recovery/. Those run-specific outputs are regenerated locally and are not committed.
+The canonical runner exports 1W (25–31 Oct 2026), 1M (25 Oct–24 Nov 2026), and 154D (25 Oct 2026–27 Mar 2027) to output/joint_recovery/. Each horizon summary includes an `objective_ledger` that separates the objective actually optimized from operational cost terms that remain unintegrated. Those run-specific outputs are regenerated locally and are not committed.
 
 ## Verified recovery snapshot
 

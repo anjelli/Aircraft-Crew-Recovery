@@ -1,9 +1,10 @@
-"""Reviewable objective contract for a production solver that is not present here."""
+"""Cost-component helpers and legacy policy API; the canonical run objective lives in operational_objective.py."""
 from __future__ import annotations
 import csv, math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Sequence
+# Retained for backwards-compatible cost-component utilities only; not the active solver objective.
 OBJECTIVE_TERMS=("cancellation_penalty","retiming_penalty","crew_efficiency_penalty","crew_set_count")
 DEFAULT_PRIORITY_ORDER=OBJECTIVE_TERMS
 SOURCE_COST_KEYS={"cancellation_penalty":(),"retiming_penalty":("retime_base","retiming_cost_tier_1","retiming_cost_tier_2","retiming_cost_tier_3"),
@@ -97,8 +98,24 @@ def objective_key(components:Mapping[str,float],config:ObjectiveConfig|None=None
  if not cfg.revenue_cancellation_enabled and values["cancellation_penalty"]!=0:raise ObjectiveConfigurationError("Nonzero cancellation penalty supplied while revenue term is disabled")
  return tuple(values[t] for t in cfg.priority_order) if cfg.mode=="lexicographic" else sum(values[t]*float(cfg.weights[t]) for t in OBJECTIVE_TERMS)
 def objective_contract():
- return {"status":"INTERFACE_DEFINED_OPERATIONAL_INTEGRATION_BLOCKED","production_solver_present":False,"default_mode":"lexicographic",
-  "default_priority_order":list(DEFAULT_PRIORITY_ORDER),"priority_order_confirmed_by_owner":False,"weights":None,
-  "weights_note":"Weighted mode requires four explicit owner-approved weights; no weights are invented.","revenue_cancellation_enabled":False,
-  "components":SOLVER_LAYER_REQUIREMENTS,"source_cost_parameters":SOURCE_COST_KEYS,
-  "integration_guard":"Do not treat uncovered slack as cancellations or selected pairing count as distinct crew-set count."}
+ """Return the canonical five-term run contract plus legacy cost-helper metadata.
+
+ The four-term ObjectiveConfig interface is retained for compatibility with
+ existing cost-component tests and experiments. It is not the objective used by
+ the active joint recovery solver.
+ """
+ from crew_recovery.operational_objective import objective_contract as canonical_contract
+ contract = canonical_contract(
+  retiming_integrated=False,
+  crew_efficiency_integrated=False,
+  crew_roster_integrated=False,
+  approved_operating_cost_integrated=False,
+ )
+ contract["legacy_cost_component_helpers"] = {
+  "status": "COMPATIBILITY_API_NOT_USED_AS_ACTIVE_SOLVER_POLICY",
+  "component_terms": list(OBJECTIVE_TERMS),
+  "source_cost_parameters": SOURCE_COST_KEYS,
+  "integration_requirements": SOLVER_LAYER_REQUIREMENTS,
+  "note": "Use operational_terms and implemented_stages for the current run. The legacy ObjectiveConfig is not wired into joint_recovery.py.",
+ }
+ return contract

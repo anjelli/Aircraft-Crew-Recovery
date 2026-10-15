@@ -12,7 +12,8 @@ for _project_path in (PROJECT_ROOT, SRC_DIR):
 
 from crew_recovery.objective_spec import objective_contract,load_cost_parameters
 ROOT=PROJECT_ROOT
-CANDIDATES=("mip.py","mip_solver.py","operational_solver.py","column_generation.py","branch_and_price.py","aircraft_timeline_solver.py","solver/column_generation.py","solver/aircraft_timeline.py","run_end_to_end.py")
+CANDIDATES=("mip.py","mip_solver.py","operational_solver.py","branch_and_price.py","aircraft_timeline_solver.py","solver/column_generation.py","solver/aircraft_timeline.py","run_end_to_end.py")
+CG_RESEARCH_COMPONENTS=("column_generation.py","src/crew_recovery/integrated_column_generation.py","src/crew_recovery/resource_constrained_pricing.py")
 LOGS=(("1W","logs/mip_1W.log"),("FULL","logs/mip_155D.log"))
 def parse_embedded_summary(text):
  m=re.search(r"(?m)^\s*\{",text)
@@ -43,33 +44,62 @@ def baseline_breakdown(root):
  return pd.DataFrame(rows),summaries
 def readiness_rows(costs):
  data=[
- ("cancellation_penalty",1,"No usable cancellation parameter; needs validated per-flight revenue value","None; uncovered slack is not cancellation","No cancellation variable; revenue keys and fare units unresolved."),
- ("retiming_penalty",2,"retime_base; retiming_cost_tier_1/2/3","None; MIP does not choose flight-copy offsets","Needs selected flight-copy and offset variables; approved range required."),
- ("crew_efficiency_penalty",3,"unutilized_hub_time_cost_scaling; unutilized_spoke_time_cost_scaling; fdp_wasted_cost_scaling","None; no duty-efficiency variables","Needs unused-time/FDP metrics and owner-confirmed units."),
- ("crew_set_count",4,"man_day_cost is available but not assumed equivalent to cost per set","None; pairing count is not crew-set count","Needs crew-set/roster variables and owner-confirmed priority order.")]
+ ("cancellation_count",1,"No monetary cancellation input is used by the current solver","Active: minimize cancelled eligible flights","ACTIVE","The current prototype optimizes cancellation count; revenue-weighted penalties remain disabled."),
+ ("total_absolute_retiming_minutes",2,"retime_base; retiming_cost_tier_1/2/3","None: flight-copy selection is not integrated","BLOCKED_NOT_INTEGRATED","Requires approved offsets and selected flight-copy variables; generated copies alone are not an optimization decision."),
+ ("approved_operating_cost",3,"man_day_cost plus any approved aircraft/operating cost inputs","Partial proxy: selected pairing cost plus aircraft-start cost","PARTIAL_PROXY","The current cost term is incomplete; allowances, swaps/repositioning, and other approved operating costs require definitions and implementation."),
+ ("crew_efficiency_cost",4,"unutilized_hub_time_cost_scaling; unutilized_spoke_time_cost_scaling; fdp_wasted_cost_scaling","None: no duty-efficiency variables","BLOCKED_NOT_INTEGRATED","Requires unused-time/FDP metrics and owner-confirmed units."),
+ ("distinct_crew_set_count",5,"man_day_cost is available but is not assumed equivalent to cost per set","None: selected pairing count is not distinct crew-set count","BLOCKED_NOT_INTEGRATED","Requires crew-set/roster assignment variables and owner-confirmed priority order.")]
  rows=[]
- for term,priority,params,analogue,blocker in data:
-  names={"retiming_penalty":("retime_base","retiming_cost_tier_1","retiming_cost_tier_2","retiming_cost_tier_3"),
-         "crew_efficiency_penalty":("unutilized_hub_time_cost_scaling","unutilized_spoke_time_cost_scaling","fdp_wasted_cost_scaling"),
-         "crew_set_count":("man_day_cost",)}.get(term,())
+ for term,priority,params,analogue,status,blocker in data:
+  names={
+   "total_absolute_retiming_minutes":("retime_base","retiming_cost_tier_1","retiming_cost_tier_2","retiming_cost_tier_3"),
+   "approved_operating_cost":("man_day_cost",),
+   "crew_efficiency_cost":("unutilized_hub_time_cost_scaling","unutilized_spoke_time_cost_scaling","fdp_wasted_cost_scaling"),
+   "distinct_crew_set_count":("man_day_cost",),
+  }.get(term,())
   rows.append({"Term":term,"Proposed priority (confirmation pending)":priority,"Source cost parameters":params,
-   "Loaded values":json.dumps({k:costs.get(k) for k in names},sort_keys=True),"Current generic-MIP analogue":analogue,
-   "Status":"BLOCKED_NOT_RUN","Blocker":blocker,"Numeric operational component":None})
+   "Loaded values":json.dumps({k:costs.get(k) for k in names},sort_keys=True),"Current solver analogue":analogue,
+   "Status":status,"Blocker":blocker,"Numeric operational component":None})
  return pd.DataFrame(rows)
 def run(repo_root,output_dir):
  root=Path(repo_root);cost=next((p for p in (root/"originals"/"cost_parameters.csv",root/"cost_parameters.csv") if p.is_file()),None)
- costs=load_cost_parameters(cost) if cost else {};found=[x for x in CANDIDATES if (root/x).is_file()]
+ costs=load_cost_parameters(cost) if cost else {}
+ found=[x for x in CANDIDATES if (root/x).is_file()]
+ cg_found=[x for x in CG_RESEARCH_COMPONENTS if (root/x).is_file()]
  baseline,summaries=baseline_breakdown(root);components=readiness_rows(costs)
- report={"operational_solver_present":bool(found),"operational_solver_files_found":found,"files_checked":list(CANDIDATES),
+ contract=objective_contract()
+ joint_prototype=(root/"src"/"crew_recovery"/"joint_recovery.py").is_file()
+ report={
+  "operational_solver_present":bool(found),
+  "operational_solver_files_found":found,
+  "files_checked":list(CANDIDATES),
+  "joint_recovery_prototype_present":joint_prototype,
+  "coverage_lp_cg_research_present":bool(cg_found),
+  "coverage_lp_cg_research_files_found":cg_found,
   "archived_generic_mip_present":(root/"patches"/"mip.py.orig").is_file(),
-  "finding":"No active production column-generation/aircraft-timeline solver found. patches/mip.py.orig is an archived generic coverage MIP, not the operational solver.",
-  "cost_parameter_file":str(cost) if cost else None,"cost_parameters_loaded":len(costs),"four_term_objective_status":"BLOCKED_NOT_RUN",
-  "baseline_summaries_found":sorted(summaries),"objective_contract":objective_contract()}
+  "finding":(
+   "The repository contains a joint operate/cancel recovery prototype and a separate coverage-LP/CG research path. "
+   "No complete production integrated crew/aircraft solver is detected by the production-solver inventory."
+  ),
+  "cost_parameter_file":str(cost) if cost else None,
+  "cost_parameters_loaded":len(costs),
+  "four_term_objective_status":"BLOCKED_NOT_RUN",
+  "canonical_objective_policy_status":contract["policy_status"],
+  "current_solver_objective_stages":contract["current_solver_objective"],
+  "baseline_summaries_found":sorted(summaries),
+  "objective_contract":contract,
+ }
  out=Path(output_dir);out.mkdir(parents=True,exist_ok=True)
  baseline.to_csv(out/"baseline_objective_breakdown.csv",index=False);components.to_csv(out/"objective_component_readiness.csv",index=False)
  (out/"objective_readiness.json").write_text(json.dumps(report,indent=2,sort_keys=True),encoding="utf-8")
- print(json.dumps({"operational_solver_present":report["operational_solver_present"],"four_term_objective_status":report["four_term_objective_status"],
-  "baseline_objective_breakdown":baseline.to_dict(orient="records"),"outputs":str(out)},indent=2,default=str))
+ print(json.dumps({
+  "operational_solver_present":report["operational_solver_present"],
+  "joint_recovery_prototype_present":report["joint_recovery_prototype_present"],
+  "coverage_lp_cg_research_present":report["coverage_lp_cg_research_present"],
+  "four_term_objective_status":report["four_term_objective_status"],
+  "baseline_objective_breakdown":baseline.to_dict(orient="records"),
+  "outputs":str(out)
+ },indent=2,default=str))
  return report
 def main():
  ap=argparse.ArgumentParser(description=__doc__);ap.add_argument("--repo-root",type=Path,default=ROOT);ap.add_argument("--output-dir",type=Path,default=ROOT/"output"/"objective_readiness")
