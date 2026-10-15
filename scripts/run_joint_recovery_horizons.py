@@ -26,9 +26,16 @@ def _reset_output(output_root: Path) -> None:
     """Replace only the selected run-output directory; never delete arbitrary paths."""
     output_root = output_root.expanduser().resolve()
     allowed_parent = (ROOT / "output").resolve()
-    if output_root == ROOT.resolve() or output_root == allowed_parent or allowed_parent not in output_root.parents:
+    # Production defaults are constrained to output/. Allow external directories
+    # for tests and deliberate temporary runs, but never delete the repository root
+    # or the shared output parent itself.
+    if output_root == ROOT.resolve() or output_root == allowed_parent:
         raise ValueError(
-            f"Refusing to clean output path outside a dedicated output subdirectory: {output_root}"
+            f"Refusing to clean the repository root or shared output directory: {output_root}"
+        )
+    if allowed_parent not in output_root.parents and output_root.exists():
+        raise ValueError(
+            f"Refusing to clean an existing directory outside output/: {output_root}"
         )
     if output_root.exists():
         shutil.rmtree(output_root)
