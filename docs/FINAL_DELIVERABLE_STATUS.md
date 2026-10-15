@@ -4,12 +4,11 @@
 
 ## Reference execution
 
-- Workflow: [GitHub Actions run 38475474585](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38475474585)
-- Code commit: f568009440afab7f66b7f6fe1ac93f459696eb03
-- Result: success; 108 tests passed.
-- Execution steps: prepared canonical inputs, ran tests, audited AIRFLITE line transitions against MGT, ran all three horizons, and uploaded outputs/audits.
-- Candidate mode: existing-only. Additional pairing generation was skipped for bounded runtime; generated pairing candidates = 0.
-- Output package: [download recovered schedules and audit evidence](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38475474585/artifacts/11854070943).
+- Workflow: [GitHub Actions run 38733921684](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38733921684)
+- Tested PR head: b1ca91a6669d57e1646cf91e9f7e3352f3bbbd8e
+- Result: success; the regression test suite, supplied-line baseline audit, all three horizon runs, and artifact upload passed.
+- Execution mode: existing-only. Additional pairing generation was skipped for bounded runtime; generated pairing candidates = 0.
+- Output package: [download recovered schedules and audit evidence](https://github.com/anjelli/Aircraft-Crew-Recovery/actions/runs/38733921684/artifacts/11972375014).
 
 This pinned workflow run is the source of truth for the results below. A separate 1-week JSON supplied during the discussion reports 582 operated flights and 591 validated candidates; that is not the same result snapshot as this workflow, which reports 570 and 352. The available evidence does not establish why those runs differ. Do not mix metrics from the separate run into this table.
 
@@ -22,6 +21,20 @@ This pinned workflow run is the source of truth for the results below. A separat
 | 154D · 25 Oct 2026–27 Mar 2027 | Deterministic heuristic; unresolved MGT remains | 19,231 | 19,222 | 12,302 | 6,920 | 9 | 63.97% of all; 64.00% of eligible | 8,433 | 5,327 | 0 / 0 |
 
 Cancelled counts exclude the nine unresolved-MGT flights. They are reported separately. Post-solve checks reported zero aircraft-route violations and zero crew-coverage errors for the selected plans under the current provisional assumptions.
+
+
+## Schedule reconciliation findings
+
+The current run wrote `schedule_reconciliation.csv` for each horizon. All operated flights retained the scenario-adjusted times, and the audit reported zero internal consistency failures. This is a result-consistency check, not a certificate of operational feasibility.
+
+| Horizon | Flights reconciled | Scenario-modified flights | Operated flights matching scenario times | Consistency failures |
+|---|---:|---:|---:|---:|
+| 1W | 825 | 0 | 570 / 570 | 0 |
+| 1M | 3,763 | 0 | 2,286 / 2,286 | 0 |
+| 154D | 19,231 | 0 | 12,302 / 12,302 | 0 |
+
+All three results used the default `baseline_no_disruption` scenario, so the scenario-modified count is zero. Cancellations therefore were not triggered by explicit scenario events in this run; they reflect the outcome of the restricted candidate pool and the current recovery method. This does not establish that all those flights were operationally cancellable.
+
 
 ## What the heuristic comparison demonstrates
 
@@ -51,13 +64,12 @@ The audit result is included in the downloadable workflow artifact. LINE_n value
 ## What is in the artifact
 
 The recovered-schedules artifact contains the three horizon folders, each with:
-- summary.json;
-- flight_decisions.csv;
-- selected_pairings.csv;
-- aircraft_rotations.csv;
+- summary.json, including the objective ledger and schedule-reconciliation KPIs;
+- flight_decisions.csv and schedule_reconciliation.csv;
+- selected_pairings.csv and aircraft_rotations.csv;
 - pairing validation status and violation reports;
 - aircraft validation output;
-- a recovery workbook;
+- a recovery workbook with a Schedule Reconciliation worksheet;
 - missing_mgt_rules.csv for the 154-day horizon.
 
 The audit folder includes the aircraft-line transition audit, its summary, data-quality/revenue audit outputs, and duplicate-row audit from workspace preparation. Run-specific outputs are not stored as current results in the Git tree; the artifact is the versioned execution evidence for this snapshot.
