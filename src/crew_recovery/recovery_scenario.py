@@ -1,9 +1,10 @@
-"""Versioned, explicit disruption scenarios for reproducible recovery runs.
+"""Versioned disruptions and explicit retiming choices for reproducible recovery runs.
 
-This first schema deliberately supports only disruptions represented by the
-current operate/cancel model: flight delays, equipment-code changes, and
-whole-run aircraft unavailability. It does not imply optimized retiming,
-aircraft swaps, or time-bounded maintenance modelling.
+Supported events represent flight delays, equipment-code changes, whole-run
+aircraft unavailability, and candidate flight retiming offsets. The bounded
+retiming search re-solves the operate/cancel model over a finite set of offsets;
+it is not a global continuous-time optimization, aircraft swaps, or time-bounded
+maintenance model.
 """
 from __future__ import annotations
 
