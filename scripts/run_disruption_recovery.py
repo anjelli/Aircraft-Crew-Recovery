@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "run_one_week_joint_recovery.py"
 SRC = ROOT / "src"
@@ -43,6 +45,69 @@ def _score(summary: dict[str, Any]) -> tuple[float, float, float]:
         )
     except (TypeError, ValueError):
         return (math.inf, math.inf, math.inf)
+
+
+def _discover_retiming_flights(
+    delayed_flights: list[str],
+    delay_by_flight: dict[str, int],
+    *,
+    start_date: str,
+    days: int,
+) -> list[str]:
+    """Add nearby downstream flights whose connections can be affected by a delay."""
+    schedule_path = ROOT / "input" / "schedule.xlsx"
+    if not schedule_path.is_file():
+        raise FileNotFoundError(
+            f"Prepared schedule not found at {schedule_path}; run python setup_workspace.py first."
+        )
+    frame = pd.read_excel(schedule_path)
+    required = {"Day", "STD", "STA", "Flt Num", "From", "To"}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(f"Prepared schedule missing columns needed for retiming-neighbor search: {missing}")
+    for column in ("Day", "STD", "STA"):
+        frame[column] = pd.to_datetime(frame[column], errors="coerce")
+    if frame[["Day", "STD", "STA"]].isna().any(axis=None):
+        raise ValueError("Prepared schedule has invalid service dates or local times")
+    frame["flight_id"] = (
+        frame["Flt Num"].astype(int).astype(str)
+        + "_"
+        + frame["STD"].dt.strftime("%Y%m%dT%H%M%S")
+    )
+    frame["From_key"] = frame["From"].astype(str).str.strip().str.upper()
+    frame["To_key"] = frame["To"].astype(str).str.strip().str.upper()
+    lookup = {str(row["flight_id"]): row for row in frame.to_dict("records")}
+    horizon_start = pd.Timestamp(start_date).normalize()
+    horizon_end = horizon_start + pd.Timedelta(days=days - 1)
+    ordered = list(delayed_flights)
+    candidates: list[tuple[float, str]] = []
+    for flight_id in delayed_flights:
+        row = lookup.get(flight_id)
+        if row is None:
+            raise ValueError(f"Disrupted flight_id {flight_id!r} is not in the prepared schedule")
+        target_station = row["To_key"]
+        impacted_arrival = pd.Timestamp(row["STA"]) + pd.Timedelta(minutes=delay_by_flight.get(flight_id, 0))
+        low = pd.Timestamp(row["STA"]) - pd.Timedelta(hours=3)
+        high = impacted_arrival + pd.Timedelta(hours=3)
+        peers = frame.loc[
+            frame["From_key"].eq(target_station)
+            & frame["flight_id"].ne(flight_id)
+            & frame["Day"].dt.normalize().between(horizon_start, horizon_end)
+            & frame["STD"].between(low, high)
+        ].copy()
+        if not peers.empty:
+            peers["distance_minutes"] = (
+                peers["STD"] - impacted_arrival
+            ).abs().dt.total_seconds() / 60.0
+            peers = peers.sort_values(["distance_minutes", "STD", "flight_id"])
+            for peer in peers.head(2).to_dict("records"):
+                fid = str(peer["flight_id"])
+                if fid not in ordered:
+                    candidates.append((float(peer["distance_minutes"]), fid))
+    for _distance, flight_id in sorted(candidates, key=lambda item: (item[0], item[1])):
+        if flight_id not in ordered:
+            ordered.append(flight_id)
+    return ordered
 
 
 def _trial_manifest(
@@ -133,10 +198,10 @@ def main() -> int:
     parser.add_argument("--days", type=int, default=7)
     parser.add_argument("--time-limit-seconds", type=float, default=120.0)
     parser.add_argument("--pairing-mode", choices=("existing-only", "expanded"), default="existing-only")
-    parser.add_argument("--max-retimed-flights", type=int, default=1)
+    parser.add_argument("--max-retimed-flights", type=int, default=3)
     parser.add_argument(
         "--retime-options",
-        default="-30,-15,0,15,30",
+        default="-30,-15,0,15,30,45,60,90",
         help="Comma-separated candidate offsets (minutes) relative to the disruption-adjusted times.",
     )
     parser.add_argument("--output-dir", type=Path, default=ROOT / "output" / "disruption_recovery")
@@ -176,7 +241,9 @@ def main() -> int:
     if len(options) < 2:
         parser.error("At least two valid retiming options are required.")
 
-    candidate_flights = delayed_flights[:args.max_retimed_flights]
+    candidate_flights = _discover_retiming_flights(
+        delayed_flights, delay_by_flight, start_date=args.start_date, days=args.days
+    )[:args.max_retimed_flights]
     output_root = args.output_dir.expanduser().resolve()
     trial_root = output_root / "trials"
     manifest_root = output_root / "trial_manifests"
