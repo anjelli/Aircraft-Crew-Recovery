@@ -43,6 +43,7 @@ from crew_recovery.project_paths import input_file, original_file
 from crew_recovery.recovery_scenario import (
     apply_aircraft_events,
     apply_flight_events,
+    apply_flight_retiming_events,
     load_recovery_scenario,
 )
 from crew_recovery.schedule_reconciliation import build_schedule_reconciliation
@@ -132,7 +133,12 @@ def main() -> int:
         "scope": {"start_date": start.date().isoformat(), "end_date": end.date().isoformat(), "days": args.days},
         "status": "BLOCKED_NOT_OPTIMIZED",
         "equipment_in_scope": ["320", "32N", "32P", "32Q"],
-        "retiming_supported": False,
+        "retiming_supported": True,
+        "retiming_selection_method": (
+            "Explicit retiming choices are applied before pairing/aircraft feasibility checks. "
+            "Automatic bounded offset selection is performed by scripts/run_disruption_recovery.py; "
+            "the native joint solver still optimizes operate/cancel and its supported cost proxy."
+        ),
         "objective_policy": ["minimize_cancellations", "minimize_midnight_aware_crew_salary_plus_aircraft_start_cost"],
         "objective_contract": objective_contract(retiming_integrated=False, crew_efficiency_integrated=False, crew_roster_integrated=False),
         "objective_ledger": {
@@ -149,8 +155,8 @@ def main() -> int:
         "scenario": {"status": "NOT_LOADED"},
         "scenario_application": {"status": "NOT_APPLIED"},
         "recovered_schedule_basis": (
-            "Scenario-adjusted schedule times/equipment are used as inputs. "
-            "The current solver does not optimize retiming decisions."
+            "Disruption-adjusted schedule times/equipment plus any selected FLIGHT_RETIME offsets. "
+            "Operated flights export recovered times; cancelled flights have no recovered times."
         ),
     }
     try:
@@ -171,13 +177,33 @@ def main() -> int:
             start_date=start,
             end_date=end,
         )
+        # Preserve the disrupted-but-not-retimed schedule separately from the
+        # recovery candidate times so exported deltas have an unambiguous basis.
+        scenario_values = prepared.set_index("flight_id")[
+            ["STD_local", "STA_local", "Eqp"]
+        ].copy()
+        prepared, retiming_application = apply_flight_retiming_events(
+            prepared,
+            scenario,
+            resolver,
+            start_date=start,
+            end_date=end,
+            baseline_values=baseline_values,
+        )
         for baseline_column, source_column in (
             ("baseline_STD_local", "STD_local"),
             ("baseline_STA_local", "STA_local"),
             ("baseline_Eqp", "Eqp"),
         ):
             prepared[baseline_column] = prepared["flight_id"].map(baseline_values[source_column])
+        for scenario_column, source_column in (
+            ("scenario_STD_local", "STD_local"),
+            ("scenario_STA_local", "STA_local"),
+            ("scenario_Eqp", "Eqp"),
+        ):
+            prepared[scenario_column] = prepared["flight_id"].map(scenario_values[source_column])
         summary["scenario_application"] = scenario_application
+        summary["retiming_application"] = retiming_application
         active = prepared.loc[prepared["Day"].dt.normalize().between(start, end)].copy().reset_index(drop=True)
         if active.empty:
             raise ValueError("No active flights found for requested one-week window")
@@ -445,17 +471,24 @@ def main() -> int:
                 "baseline_Eqp": active_records[fid]["baseline_Eqp"],
                 "original_STD_local": str(active_records[fid]["baseline_STD_local"]),
                 "original_STA_local": str(active_records[fid]["baseline_STA_local"]),
-                "scenario_STD_local": str(active_records[fid]["STD_local"]),
-                "scenario_STA_local": str(active_records[fid]["STA_local"]),
+                "scenario_STD_local": str(active_records[fid]["scenario_STD_local"]),
+                "scenario_STA_local": str(active_records[fid]["scenario_STA_local"]),
+                "scenario_Eqp": active_records[fid]["scenario_Eqp"],
                 "recovered_STD_local": None if is_cancelled else str(active_records[fid]["STD_local"]),
                 "recovered_STA_local": None if is_cancelled else str(active_records[fid]["STA_local"]),
+                "recovered_Eqp": None if is_cancelled else active_records[fid]["Eqp"],
                 "recovery_action": "CANCEL" if is_cancelled else "OPERATE",
                 "cancellation_reason_code": reason_code,
                 "cancellation_reason": reason_text,
                 "candidate_pairing_count": candidate_count,
                 "assigned_pairing_id": None if is_cancelled else selected_map.get(fid_key),
                 "assigned_aircraft_tail": None if is_cancelled else result.aircraft_by_flight.get(fid_key),
-                "retime_minutes": 0,
+                "retime_minutes": (
+                    None if is_cancelled else int(round((
+                        pd.Timestamp(active_records[fid_key]["STD_local"])
+                        - pd.Timestamp(active_records[fid_key]["scenario_STD_local"])
+                    ).total_seconds() / 60.0))
+                ),
             })
         decisions = pd.DataFrame(decision_rows)
         if not missing_mgt.empty:
@@ -471,9 +504,11 @@ def main() -> int:
                     "baseline_Eqp": row["baseline_Eqp"],
                     "original_STD_local": str(row["baseline_STD_local"]),
                     "original_STA_local": str(row["baseline_STA_local"]),
-                    "scenario_STD_local": str(row["STD_local"]),
-                    "scenario_STA_local": str(row["STA_local"]),
+                    "scenario_STD_local": str(row["scenario_STD_local"]),
+                    "scenario_STA_local": str(row["scenario_STA_local"]),
+                    "scenario_Eqp": row["scenario_Eqp"],
                     "recovered_STD_local": None, "recovered_STA_local": None,
+                    "recovered_Eqp": None,
                     "recovery_action": "UNRESOLVED_MGT",
                     "cancellation_reason_code": "MGT_RULE_UNRESOLVED",
                     "cancellation_reason": "No unambiguous applicable MGT rule; requires data-owner resolution.",

@@ -55,7 +55,11 @@ def build_schedule_reconciliation(
     recovered_sta = pd.to_datetime(frame["recovered_STA_local"], errors="coerce")
 
     baseline_equipment = frame["baseline_Eqp"].fillna("").astype(str).str.strip()
-    scenario_equipment = frame["Eqp"].fillna("").astype(str).str.strip()
+    scenario_equipment = (
+        frame["scenario_Eqp"].fillna("").astype(str).str.strip()
+        if "scenario_Eqp" in frame.columns
+        else frame["Eqp"].fillna("").astype(str).str.strip()
+    )
     equipment_changed = baseline_equipment.ne(scenario_equipment)
     baseline_equipment_missing = baseline_equipment.eq("")
     scenario_equipment_missing = scenario_equipment.eq("")
@@ -84,7 +88,27 @@ def build_schedule_reconciliation(
         & recovered_std.eq(scenario_std)
         & recovered_sta.eq(scenario_sta)
     )
-    recovered_equipment = scenario_equipment.where(operated, other=pd.NA)
+    recovered_equipment_source = (
+        frame["recovered_Eqp"].fillna("").astype(str).str.strip()
+        if "recovered_Eqp" in frame.columns
+        else scenario_equipment
+    )
+    recovered_equipment = recovered_equipment_source.where(operated, other=pd.NA)
+    if "retime_minutes" in frame.columns:
+        retime_minutes = pd.to_numeric(frame["retime_minutes"], errors="coerce")
+    else:
+        retime_minutes = pd.Series(0.0, index=frame.index)
+    expected_recovered_std = scenario_std + pd.to_timedelta(retime_minutes, unit="m")
+    expected_recovered_sta = scenario_sta + pd.to_timedelta(retime_minutes, unit="m")
+    matches_recorded_retiming = (
+        retime_minutes.notna()
+        & recovered_std.notna()
+        & recovered_sta.notna()
+        & expected_recovered_std.notna()
+        & expected_recovered_sta.notna()
+        & recovered_std.eq(expected_recovered_std)
+        & recovered_sta.eq(expected_recovered_sta)
+    )
 
     issues_by_row: list[str] = []
     for idx in range(len(frame)):
@@ -106,8 +130,14 @@ def build_schedule_reconciliation(
         has_aircraft = pd.notna(aircraft_id) and bool(str(aircraft_id).strip())
 
         if row_action == "OPERATE":
-            if not matches_scenario.iloc[idx]:
-                issues.append("OPERATED_TIMES_DIFFER_FROM_SCENARIO")
+            if not matches_recorded_retiming.iloc[idx]:
+                if (
+                    pd.notna(retime_minutes.iloc[idx])
+                    and abs(float(retime_minutes.iloc[idx])) < 1e-9
+                ):
+                    issues.append("OPERATED_TIMES_DIFFER_FROM_SCENARIO")
+                else:
+                    issues.append("OPERATED_TIMES_DO_NOT_MATCH_RECORDED_RETIMING")
             if not has_pairing:
                 issues.append("OPERATED_FLIGHT_MISSING_PAIRING")
             if not has_aircraft:
@@ -140,8 +170,9 @@ def build_schedule_reconciliation(
         "recovered_STA_local": frame["recovered_STA_local"],
         "scenario_arrival_shift_minutes": arrival_shift,
         "baseline_Eqp": frame["baseline_Eqp"],
-        "scenario_Eqp": frame["Eqp"],
+        "scenario_Eqp": frame["scenario_Eqp"] if "scenario_Eqp" in frame.columns else frame["Eqp"],
         "recovered_Eqp": recovered_equipment,
+        "retime_minutes": retime_minutes,
         "scenario_departure_or_arrival_changed": scenario_times_changed,
         "scenario_equipment_changed": equipment_changed,
         "scenario_changed_from_baseline": scenario_changed,
@@ -164,7 +195,9 @@ def build_schedule_reconciliation(
         "scenario_equipment_changed_flights": int(equipment_changed.sum()),
         "operated_flights": operated_count,
         "operated_flights_matching_scenario_times": int((operated & matches_scenario).sum()),
+        "operated_flights_matching_recorded_retiming": int((operated & matches_recorded_retiming).sum()),
         "operated_flights_retimed_after_scenario": int((operated & ~matches_scenario).sum()),
+        "total_absolute_retiming_minutes": float(retime_minutes.loc[operated].abs().sum()),
         "cancelled_flights": int(cancelled.sum()),
         "cancellations_on_unchanged_scenario_flights": int((cancelled & ~scenario_changed).sum()),
         "cancellations_on_scenario_modified_flights": int((cancelled & scenario_changed).sum()),
@@ -173,7 +206,7 @@ def build_schedule_reconciliation(
         "interpretation": (
             "This audit checks exported schedule reconciliation and assignment presence only; "
             "it is not a full operational-feasibility certificate. The current model does not "
-            "optimize retiming, so operated-flight times must equal scenario-adjusted times."
+            "optimize retiming in the native MILP, so operated-flight times are checked against the explicit selected retiming offsets."
         ),
     }
     return report, summary
