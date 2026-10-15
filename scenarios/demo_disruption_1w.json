@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "scenario_id": "demo_60_min_delay_retiming_recovery",
+  "scenario_id": "demo_10_min_delay_retiming_recovery",
   "description": "Reproducible one-week experiment: a 10-minute delay to flight 248 SIN-YIA on 25 Oct 2026 creates a connection conflict for flight 249 YIA-SIN. The recovery search tests bounded retiming offsets and exports the selected recovered schedule.",
   "events": [
     {
