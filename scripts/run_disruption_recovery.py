@@ -27,6 +27,8 @@ for path in (ROOT, SRC):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from crew_recovery.aircraft_line_inputs import load_aircraft_line_inventory
+from crew_recovery.project_paths import input_file, original_file
 from crew_recovery.recovery_scenario import load_recovery_scenario
 
 
@@ -80,6 +82,40 @@ def _discover_retiming_flights(
     horizon_start = pd.Timestamp(start_date).normalize()
     horizon_end = horizon_start + pd.Timedelta(days=days - 1)
     ordered = list(delayed_flights)
+
+    # Prefer the actual next flight in the supplied AIRFLITE line-of-work for
+    # the disrupted flight. This is still provisional line data, not a verified
+    # tail inventory, but it makes a recovery test target the connection most
+    # directly affected by the disruption instead of an unrelated nearby flight.
+    _aircraft, line_assignments = load_aircraft_line_inventory(
+        original_file("low_kgp"),
+        input_file("schedule.xlsx"),
+        start_date=horizon_start.date().isoformat(),
+        end_date=horizon_end.date().isoformat(),
+    )
+    line_by_flight = {
+        str(row["flight_id"]): row
+        for row in line_assignments.to_dict("records")
+    }
+    for flight_id in delayed_flights:
+        current = line_by_flight.get(flight_id)
+        if current is None:
+            continue
+        same_line = line_assignments.loc[
+            line_assignments["provisional_aircraft_id"].eq(current["provisional_aircraft_id"])
+            & (line_assignments["STD"] > pd.Timestamp(current["STD"]))
+            & line_assignments["From"].astype(str).str.strip().str.upper().eq(
+                str(current["To"]).strip().upper()
+            )
+            & line_assignments["STD"].dt.normalize().between(horizon_start, horizon_end)
+        ].sort_values(["STD", "flight_id"])
+        for row in same_line.head(2).to_dict("records"):
+            fid = str(row["flight_id"])
+            if fid not in ordered:
+                ordered.append(fid)
+
+    # If line reconciliation does not identify a downstream leg, use nearby
+    # scheduled flights from the delayed flight's arrival station as fallbacks.
     candidates: list[tuple[float, str]] = []
     for flight_id in delayed_flights:
         row = lookup.get(flight_id)
