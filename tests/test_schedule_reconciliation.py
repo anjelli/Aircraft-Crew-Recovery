@@ -115,3 +115,21 @@ def test_reconciliation_rejects_duplicate_flight_ids_and_missing_columns():
         build_schedule_reconciliation(pd.concat([decisions, decisions.iloc[[0]]], ignore_index=True))
     with pytest.raises(ValueError, match="missing reconciliation columns"):
         build_schedule_reconciliation(decisions.drop(columns=["baseline_Eqp"]))
+
+
+def test_reconciliation_accepts_and_reports_explicit_retiming():
+    decisions = _decisions()
+    decisions["retime_minutes"] = 0
+    decisions.loc[decisions["flight_id"].eq("F1"), "retime_minutes"] = 15
+    decisions.loc[decisions["flight_id"].eq("F1"), "recovered_STD_local"] = "2026-10-25 08:30"
+    decisions.loc[decisions["flight_id"].eq("F1"), "recovered_STA_local"] = "2026-10-25 09:30"
+    decisions["scenario_Eqp"] = decisions["Eqp"]
+    decisions["recovered_Eqp"] = decisions["Eqp"]
+    report, summary = build_schedule_reconciliation(decisions)
+
+    assert summary["status"] == "PASS"
+    assert summary["operated_flights_matching_scenario_times"] == 1
+    assert summary["operated_flights_matching_recorded_retiming"] == 2
+    assert summary["operated_flights_retimed_after_scenario"] == 1
+    assert summary["total_absolute_retiming_minutes"] == 15.0
+    assert report.set_index("flight_id").loc["F1", "consistency_status"] == "PASS"
