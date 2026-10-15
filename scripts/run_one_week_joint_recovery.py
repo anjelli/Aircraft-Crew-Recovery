@@ -487,6 +487,8 @@ def main() -> int:
             aircraft_start_cost=aircraft_start_cost,
             solver_status=summary["status"],
             solver_reported_secondary_objective=result.secondary_objective,
+            minimum_cancellation_count_proven=result.minimum_cancellation_count_proven,
+            secondary_objective_proven_optimal=result.optimal_over_supplied_columns,
         )
         summary.update({
             "solver_mode": solver_mode,

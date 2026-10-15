@@ -141,6 +141,8 @@ def current_recovery_objective_ledger(
     aircraft_start_cost: float,
     solver_status: str,
     solver_reported_secondary_objective: float | None = None,
+    minimum_cancellation_count_proven: bool = False,
+    secondary_objective_proven_optimal: bool = False,
 ) -> dict:
     """Return run-specific values for active stages and explicit nulls for blocked terms."""
     if isinstance(cancellation_count, bool) or int(cancellation_count) != cancellation_count or cancellation_count < 0:
@@ -163,7 +165,7 @@ def current_recovery_objective_ledger(
         raise ValueError("solver_reported_secondary_objective must be finite and nonnegative")
 
     return {
-        "status": "SOLVED",
+        "status": "OBJECTIVE_LEDGER_GENERATED",
         "solver_status": str(solver_status),
         "contract": objective_contract(),
         "implemented_stages": [
@@ -172,7 +174,11 @@ def current_recovery_objective_ledger(
                 "criterion": "cancellation_count",
                 "sense": "minimize",
                 "value": int(cancellation_count),
-                "status": "optimized",
+                "status": (
+                    "OPTIMAL_WITHIN_RESTRICTED_MODEL"
+                    if minimum_cancellation_count_proven
+                    else "FEASIBLE_NOT_PROVEN_OPTIMAL"
+                ),
             },
             {
                 "stage": 2,
@@ -185,7 +191,11 @@ def current_recovery_objective_ledger(
                     None if reported_secondary is None
                     else isclose(recomputed_secondary, reported_secondary, rel_tol=1e-7, abs_tol=1e-6)
                 ),
-                "status": "optimized_or_best_available_within_solver_status",
+                "status": (
+                    "OPTIMAL_WITHIN_RESTRICTED_MODEL"
+                    if secondary_objective_proven_optimal
+                    else "FEASIBLE_NOT_PROVEN_OPTIMAL"
+                ),
                 "scope": "partial cost proxy; not the full approved operating-cost objective",
             },
         ],

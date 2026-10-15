@@ -48,6 +48,8 @@ def test_current_objective_ledger_reports_null_for_unintegrated_terms():
     assert ledger["implemented_stages"][0]["value"] == 3
     assert ledger["implemented_stages"][1]["value"] == 1300.0
     assert ledger["implemented_stages"][1]["values_reconcile"] is True
+    assert ledger["implemented_stages"][0]["status"] == "FEASIBLE_NOT_PROVEN_OPTIMAL"
+    assert ledger["implemented_stages"][1]["status"] == "FEASIBLE_NOT_PROVEN_OPTIMAL"
     terms = {term["name"]: term for term in ledger["operational_terms"]}
     assert terms["approved_operating_cost"]["status"] == "partial_proxy"
     assert terms["total_absolute_retiming_minutes"]["value"] is None
@@ -63,3 +65,18 @@ def test_current_objective_ledger_rejects_invalid_cost_values():
             aircraft_start_cost=0.0,
             solver_status="test",
         )
+
+
+
+def test_objective_ledger_only_claims_optimality_when_the_solver_proves_it():
+    ledger = current_recovery_objective_ledger(
+        cancellation_count=1,
+        selected_pairing_cost=100.0,
+        aircraft_start_cost=0.0,
+        solver_status="PROTOTYPE_OPTIMAL_OVER_SUPPLIED_COLUMNS",
+        solver_reported_secondary_objective=100.0,
+        minimum_cancellation_count_proven=True,
+        secondary_objective_proven_optimal=True,
+    )
+    assert ledger["implemented_stages"][0]["status"] == "OPTIMAL_WITHIN_RESTRICTED_MODEL"
+    assert ledger["implemented_stages"][1]["status"] == "OPTIMAL_WITHIN_RESTRICTED_MODEL"
