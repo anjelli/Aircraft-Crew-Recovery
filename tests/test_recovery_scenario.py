@@ -12,6 +12,7 @@ from crew_recovery.recovery_scenario import (
     RecoveryScenario,
     apply_aircraft_events,
     apply_flight_events,
+    apply_flight_retiming_events,
     baseline_scenario,
     load_recovery_scenario,
 )
@@ -187,3 +188,49 @@ def test_aircraft_unavailability_is_whole_run_and_fails_closed():
         apply_aircraft_events(aircraft, unknown_scenario)
     with pytest.raises(ValueError, match="every aircraft"):
         apply_aircraft_events(aircraft[:1], scenario)
+
+
+def test_retiming_is_applied_after_disruption_and_preserves_original_schedule_floor(tmp_path):
+    path = _write_scenario(path=tmp_path / "retime.json", events=[
+        {"event_id": "delay-f1", "type": "FLIGHT_DELAY", "flight_id": "F1_20261025T080000", "delay_minutes": 45},
+        {"event_id": "retime-f1", "type": "FLIGHT_RETIME", "flight_id": "F1_20261025T080000", "offset_minutes": -15},
+    ])
+    scenario = load_recovery_scenario(path)
+    resolver = FakeResolver()
+    original = _schedule()
+    baseline_values = original.set_index("flight_id")[["STD_local", "STA_local", "Eqp"]].copy()
+    disrupted, disruption_summary = apply_flight_events(
+        original, scenario, resolver, start_date="2026-10-25", end_date="2026-10-31",
+    )
+    assert disruption_summary["flight_events_applied"] == 1
+    assert disrupted.loc[0, "STD_local"] == pd.Timestamp("2026-10-25 08:45")
+
+    recovered, retiming_summary = apply_flight_retiming_events(
+        disrupted, scenario, resolver,
+        start_date="2026-10-25", end_date="2026-10-31",
+        baseline_values=baseline_values,
+    )
+    flight = recovered.set_index("flight_id").loc["F1_20261025T080000"]
+    assert flight["STD_local"] == pd.Timestamp("2026-10-25 08:30")
+    assert flight["STA_local"] == pd.Timestamp("2026-10-25 09:30")
+    assert retiming_summary["offsets_by_flight"] == {"F1_20261025T080000": -15}
+    assert retiming_summary["retimed_flight_ids"] == ["F1_20261025T080000"]
+
+
+def test_retiming_cannot_move_departure_before_original_schedule(tmp_path):
+    path = _write_scenario(path=tmp_path / "too-early.json", events=[
+        {"event_id": "delay-f1", "type": "FLIGHT_DELAY", "flight_id": "F1_20261025T080000", "delay_minutes": 15},
+        {"event_id": "retime-f1", "type": "FLIGHT_RETIME", "flight_id": "F1_20261025T080000", "offset_minutes": -30},
+    ])
+    scenario = load_recovery_scenario(path)
+    original = _schedule()
+    baseline_values = original.set_index("flight_id")[["STD_local", "STA_local", "Eqp"]].copy()
+    disrupted, _ = apply_flight_events(
+        original, scenario, FakeResolver(), start_date="2026-10-25", end_date="2026-10-31",
+    )
+    with pytest.raises(ValueError, match="before its original schedule"):
+        apply_flight_retiming_events(
+            disrupted, scenario, FakeResolver(),
+            start_date="2026-10-25", end_date="2026-10-31",
+            baseline_values=baseline_values,
+        )
