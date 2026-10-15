@@ -344,14 +344,14 @@ def main() -> int:
         "trials": trial_records,
         "selected_output_dir": str(recovered_path),
         "limitations": [
-            "Search is restricted to the configured offset grid and delayed flights considered by --max-retimed-flights.",
+            "Search is restricted to the configured offset grid and the delayed/downstream flights considered by --max-retimed-flights.",
             "The underlying solver still uses provisional LINE_n aircraft resources when aircraft_inventory.csv is absent.",
             "The five-term owner-approved objective and global pairing-column generation are not fully integrated.",
         ],
     }
     final_summary_path.write_text(json.dumps(final_summary, indent=2) + "\n", encoding="utf-8")
     copied_manifest = recovered_path / "scenario_manifest.json"
-    copied_manifest.write_text(json.dumps(final_manifest_path and json.loads(final_manifest_path.read_text(encoding="utf-8")), indent=2) + "\n", encoding="utf-8")
+    copied_manifest.write_text(json.dumps(json.loads(final_manifest_path.read_text(encoding="utf-8")), indent=2) + "\n", encoding="utf-8")
     retimed_count = int((final_summary.get("schedule_reconciliation") or {}).get("operated_flights_retimed_after_scenario", 0))
     if args.require_positive_retiming and retimed_count < 1:
         print(json.dumps({
