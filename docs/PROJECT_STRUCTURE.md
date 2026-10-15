@@ -62,8 +62,8 @@ Retiming, flight-copy selection, verified tail registrations, an airline-approve
 ## Current-run cleanup contract
 
 - The only default output location for the canonical horizon run is `output/joint_recovery/`.
-- `scripts/run_joint_recovery_horizons.py` replaces this dedicated output directory at startup, then writes each requested horizon and one aggregate `horizon_summary.json`.
+- `scripts/run_joint_recovery_horizons.py` clears only the requested horizon folders and matching logs, then rewrites one aggregate `horizon_summary.json`. Unrequested horizon folders are left untouched, and the aggregate summary is authoritative for the latest invocation.
 - `scripts/run_disruption_recovery.py` similarly replaces its selected dedicated `--output-dir` before generating trials and selected results.
 - Output cleanup refuses the repository root, the shared `output/` parent, and paths outside `output/`. It does not touch `originals/`, `input/`, code, tests, docs, logs, or historical experiment files elsewhere under `output/`.
 - Old committed files elsewhere under `output/`, `logs/`, and `patches/` remain historical evidence; they are not the latest run. They were not deleted by this cleanup change. Do not add new historical output files to Git.
-- To run just one horizon, pass e.g. `--horizons 1W`; that still replaces the canonical output directory, by design. The aggregate summary then describes only the requested horizons.
+- To run just one horizon, pass e.g. `--horizons 1W`; only that horizon's folder and log are cleared, so an inaccessible unrelated horizon folder cannot block the run. The aggregate summary describes only the requested horizons; unrequested folders may contain results from an earlier invocation.
