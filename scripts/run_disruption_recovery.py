@@ -220,6 +220,7 @@ def _run_trial(
     days: int,
     time_limit_seconds: float,
     pairing_mode: str,
+    aircraft_solver: str = "auto",
 ) -> tuple[int, dict[str, Any], str]:
     command = [
         sys.executable, str(RUNNER),
@@ -231,6 +232,8 @@ def _run_trial(
     ]
     if pairing_mode == "existing-only":
         command.append("--skip-pricing")
+    if aircraft_solver != "auto":
+        command += ["--aircraft-solver", aircraft_solver]
     proc = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
     summary_path = output_path / "summary.json"
     if not summary_path.exists():
@@ -269,6 +272,8 @@ def main() -> int:
     parser.add_argument("--days", type=int, default=7)
     parser.add_argument("--time-limit-seconds", type=float, default=120.0)
     parser.add_argument("--pairing-mode", choices=("existing-only", "expanded"), default="existing-only")
+    parser.add_argument("--aircraft-solver", choices=("auto", "flow"), default="auto",
+                        help="Aircraft solver passed to every trial (see run_one_week_joint_recovery.py).")
     parser.add_argument("--max-retimed-flights", type=int, default=3)
     parser.add_argument(
         "--require-positive-retiming", action="store_true",
@@ -374,6 +379,7 @@ def main() -> int:
             days=args.days,
             time_limit_seconds=args.time_limit_seconds,
             pairing_mode=args.pairing_mode,
+            aircraft_solver=args.aircraft_solver,
         )
         score = _score(summary) if rc == 0 else (math.inf, math.inf, math.inf)
         record = {

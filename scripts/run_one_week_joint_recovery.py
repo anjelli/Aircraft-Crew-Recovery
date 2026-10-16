@@ -39,6 +39,7 @@ from crew_recovery.pairing_scoring import pairing_efficiency_score
 from crew_recovery.operational_objective import objective_contract, current_recovery_objective_ledger
 from crew_recovery.objective_spec import load_cost_parameters
 from crew_recovery.joint_recovery import solve_joint_operate_cancel, solve_joint_operate_cancel_greedy
+from crew_recovery.flow_recovery import solve_joint_operate_cancel_flow
 from crew_recovery.project_paths import input_file, original_file
 from crew_recovery.recovery_scenario import (
     apply_aircraft_events,
@@ -105,6 +106,60 @@ def _independent_aircraft_check(decisions: pd.DataFrame, flights: pd.DataFrame, 
     return violations
 
 
+def build_pairing_candidate_diagnostics(
+    *,
+    pricing_skipped: bool,
+    existing_valid: int,
+    pricer: dict[str, object],
+    duplicate_of_existing: int,
+    skipped_outside_active: int,
+    accepted: int,
+    final_pool_size: int,
+) -> dict[str, object]:
+    """Generated / accepted / rejected / deduplicated counts for the pairing pool.
+
+    generated  = candidate sequences built by the expanded enumerator and sent to validation
+    rejected   = generated candidates that failed validation (split by reason)
+    deduplicated = legal candidates dropped as repeats (within the generator, or already
+                   present as a validated pairing-report column)
+    accepted   = new columns added to the solver's candidate pool
+    """
+    generated = int(pricer.get("generated", 0))
+    rejected_total = int(pricer.get("rejected_total", 0))
+    passed = int(pricer.get("passed_validation", 0))
+    dedup_within = int(pricer.get("deduplicated_within_pricer", 0))
+    unique_returned = int(pricer.get("unique_columns_returned", 0))
+    reconciles = (
+        generated == rejected_total + passed
+        and passed == dedup_within + unique_returned
+        and unique_returned == duplicate_of_existing + skipped_outside_active + accepted
+        and final_pool_size == existing_valid + accepted
+    )
+    return {
+        "mode": "existing_only" if pricing_skipped else "expanded",
+        "existing_report_valid_columns": int(existing_valid),
+        "generated": generated,
+        "generated_by_pairing_type": dict(pricer.get("generated_by_type", {})),
+        "rejected": {
+            "total": rejected_total,
+            "invalid_flight_set": int(pricer.get("rejected_invalid_flight_set", 0)),
+            "validator_error": int(pricer.get("rejected_validator_error", 0)),
+            "validator_violation": int(pricer.get("rejected_validator_violation", 0)),
+            "invalid_cost": int(pricer.get("rejected_invalid_cost", 0)),
+        },
+        "passed_validation": passed,
+        "deduplicated": {
+            "total": dedup_within + int(duplicate_of_existing),
+            "within_generator": dedup_within,
+            "already_in_existing_report_pool": int(duplicate_of_existing),
+        },
+        "skipped_outside_active_flights": int(skipped_outside_active),
+        "accepted_into_pool": int(accepted),
+        "final_pool_size": int(final_pool_size),
+        "counts_reconcile": bool(reconciles),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--start-date", default="2026-10-25")
@@ -113,6 +168,10 @@ def main() -> int:
     parser.add_argument(
         "--skip-pricing", action="store_true",
         help="Use only independently valid existing pairing-report columns; useful for bounded horizon-scale smoke runs.",
+    )
+    parser.add_argument(
+        "--aircraft-solver", choices=("auto", "flow"), default="auto",
+        help="auto: joint MILP up to 1,500 flights, deterministic greedy above. flow: exact time-expanded aircraft-flow MILP at any size.",
     )
     parser.add_argument("--output-dir", type=Path, default=ROOT / "output" / "one_week_joint_recovery")
     parser.add_argument(
@@ -352,6 +411,8 @@ def main() -> int:
         single_option_before_pricing = sum(degree == 1 for degree in candidate_degree.values())
         generated_count = 0
         duplicate_generated = 0
+        skipped_outside_active = 0
+        pricer_diagnostics: dict[str, object] = {}
         generated_domain_size = 0
         pricing_states_explored = 0
         if not args.skip_pricing:
@@ -379,12 +440,14 @@ def main() -> int:
             generated_pool = pricer.generate_candidates()
             generated_domain_size = len(generated_pool)
             pricing_states_explored = pricer.states_explored
+            pricer_diagnostics = pricer.candidate_diagnostics
             active_ids = set(active["flight_id"])
             for col in generated_pool:
                 if col.flight_ids in seen_sequences:
                     duplicate_generated += 1
                     continue
                 if not set(col.flight_ids).issubset(active_ids):
+                    skipped_outside_active += 1
                     continue
                 candidate_columns.append(col)
                 seen_sequences.add(col.flight_ids)
@@ -397,7 +460,24 @@ def main() -> int:
         # the route-flow binary model can spend its time limit before finding an
         # incumbent; use the explicit deterministic feasibility heuristic instead.
         solver_mode = "joint_milp"
-        if len(active) > 1500:
+        if args.aircraft_solver == "flow":
+            try:
+                result = solve_joint_operate_cancel_flow(
+                    mgt_flights, candidate_columns, aircraft,
+                    time_limit_seconds=args.time_limit_seconds,
+                )
+                solver_mode = "aircraft_flow_milp"
+            except RuntimeError as solve_error:
+                if "no feasible incumbent" not in str(solve_error).lower():
+                    raise
+                result = solve_joint_operate_cancel_greedy(
+                    mgt_flights,
+                    candidate_columns,
+                    aircraft,
+                    preferred_aircraft_by_flight=preferred_aircraft_by_flight,
+                )
+                solver_mode = "deterministic_greedy_no_incumbent_fallback"
+        elif len(active) > 1500:
             result = solve_joint_operate_cancel_greedy(
                 mgt_flights,
                 candidate_columns,
@@ -610,6 +690,15 @@ def main() -> int:
                 else "all-legal-one/two-duty-domain-plus-three-duty-options-targeted-to-uncovered-flights"
             ),
             "duplicate_generated_pairings_skipped": int(duplicate_generated),
+            "pairing_candidate_diagnostics": build_pairing_candidate_diagnostics(
+                pricing_skipped=bool(args.skip_pricing),
+                existing_valid=int(existing_valid_count),
+                pricer=pricer_diagnostics,
+                duplicate_of_existing=int(duplicate_generated),
+                skipped_outside_active=int(skipped_outside_active),
+                accepted=int(generated_count),
+                final_pool_size=int(len(candidate_columns)),
+            ),
             "validated_pairing_candidates": int(len(candidate_columns)),
             "invalid_pairing_candidates_in_status_report": int((statuses["Status"] == "INVALID").sum()),
             "pairings_skipped_across_window_boundary": int(skipped),
@@ -644,6 +733,8 @@ def main() -> int:
         summary["coverage_first_heuristic"] = (
             "For long horizons, three deterministic pairing orders are evaluated; maximize operated flights first, then minimize pairing plus aircraft-start cost among those plans."
             if solver_mode.startswith("deterministic_greedy") else
+            "The aircraft-flow MILP first maximizes operated flights, then minimizes supplied pairing cost; aircraft start cost is reported but not optimized."
+            if solver_mode == "aircraft_flow_milp" else
             "The joint MILP first minimizes cancellation count, fixes that count, then minimizes supplied pairing salary plus aircraft start cost."
         )
         summary["cancellation_reason_semantics"] = (

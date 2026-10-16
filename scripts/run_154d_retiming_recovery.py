@@ -34,6 +34,7 @@ def main() -> int:
             "leave disrupted flights with zero pairing candidates."
         ),
     )
+    parser.add_argument("--aircraft-solver", choices=("auto", "flow"), default="auto")
     parser.add_argument("--max-retimed-flights", type=int, default=2)
     parser.add_argument("--retime-options", default="0,5",
                         help="Comma-separated recovery offsets in minutes; each must be 0..15.")
@@ -62,6 +63,7 @@ def main() -> int:
         "--days", "154",
         "--time-limit-seconds", str(args.time_limit_seconds),
         "--pairing-mode", args.pairing_mode,
+        "--aircraft-solver", args.aircraft_solver,
         "--max-retimed-flights", str(args.max_retimed_flights),
         "--retime-options", args.retime_options,
         "--output-dir", str(output),
