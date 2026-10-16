@@ -7,6 +7,7 @@ only over that domain and the provided schedule/rule data.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from bisect import bisect_left, bisect_right
 from datetime import timedelta
 from hashlib import sha256
 from math import isfinite
@@ -93,6 +94,49 @@ class ResourceConstrainedPairingPricer:
         self.candidate_score_fn = candidate_score_fn
         self._duties: tuple[_Duty, ...] | None = None
         self._states_explored = 0
+        self._diag = self._new_diagnostics()
+        # Duty-extension pruning is exact only when every flight has STA >= STD
+        # and the duty buffers are non-negative; otherwise fall back to a full scan.
+        max_fdp_hours = max((max(v) for v in self.fdp_limits.values() if v), default=None)
+        prunable = (
+            max_fdp_hours is not None
+            and self.dsb + min(self.feb, self.deb) >= 0
+            and all(f["STA"] >= f["STD"] for f in self.flights)
+        )
+        self._max_duty_span = timedelta(hours=max_fdp_hours) if prunable else None
+
+    @staticmethod
+    def _new_diagnostics() -> dict[str, object]:
+        return {
+            "generated": 0,
+            "generated_by_type": {},
+            "rejected_invalid_flight_set": 0,
+            "rejected_validator_error": 0,
+            "rejected_validator_violation": 0,
+            "rejected_invalid_cost": 0,
+            "passed_validation": 0,
+            "deduplicated_within_pricer": 0,
+            "unique_columns_returned": 0,
+        }
+
+    @property
+    def candidate_diagnostics(self) -> dict[str, object]:
+        """Counts for the most recent ``generate_candidates`` call.
+
+        ``generated`` is the number of candidate flight sequences built by the
+        enumerator and submitted for validation. Every one of them is either
+        rejected (by reason) or passes validation; passing candidates that
+        repeat an already-seen column ID are counted as deduplicated.
+        Identity: generated = rejected_total + passed_validation and
+        passed_validation = deduplicated_within_pricer + unique_columns_returned.
+        """
+        d = dict(self._diag)
+        d["generated_by_type"] = dict(self._diag["generated_by_type"])
+        d["rejected_total"] = (
+            d["rejected_invalid_flight_set"] + d["rejected_validator_error"]
+            + d["rejected_validator_violation"] + d["rejected_invalid_cost"]
+        )
+        return d
 
     @staticmethod
     def _airport(flight: Flight, key: str) -> str:
@@ -145,6 +189,7 @@ class ResourceConstrainedPairingPricer:
             by_origin.setdefault(self._airport(f, "From"), []).append(f)
         for group in by_origin.values():
             group.sort(key=lambda f: (f["STD"], str(f["flight_id"])))
+        std_keys = {k: [f["STD"] for f in g] for k, g in by_origin.items()}
 
         duties: dict[tuple[str, ...], _Duty] = {}
 
@@ -165,10 +210,18 @@ class ResourceConstrainedPairingPricer:
             if len(path) >= self.max_sectors:
                 return
             visited = set(ids)
-            for nxt in by_origin.get(duty.end_station, ()):
+            candidates = by_origin.get(duty.end_station, ())
+            # Only flights departing at or after the previous departure can extend
+            # the duty (same rule as the former per-flight skip), and none departing
+            # after the first departure plus the longest FDP limit can fit.
+            first_index = bisect_left(std_keys.get(duty.end_station, ()), path[-1]["STD"])
+            latest_departure = (
+                None if self._max_duty_span is None else path[0]["STD"] + self._max_duty_span
+            )
+            for nxt in candidates[first_index:]:
+                if latest_departure is not None and nxt["STD"] > latest_departure:
+                    break
                 if str(nxt["flight_id"]) in visited:
-                    continue
-                if nxt["STD"] < path[-1]["STD"]:
                     continue
                 if not self._can_connect(path, nxt):
                     continue
@@ -184,23 +237,45 @@ class ResourceConstrainedPairingPricer:
         return self._duties
 
     @staticmethod
+    def _index_by_start(duties: Sequence[_Duty]):
+        """Sorted start-time keys plus (original position, duty) pairs for window lookups."""
+        items = sorted(enumerate(duties), key=lambda item: item[1].start_time)
+        return [d.start_time for _, d in items], items
+
+    def _starting_within_layover(self, index, after) -> list[_Duty]:
+        """Duties starting in (after, after + max_layover], in their original order."""
+        keys, items = index
+        lo = bisect_right(keys, after)
+        hi = bisect_right(keys, after + self.max_layover)
+        return [d for _, d in sorted(items[lo:hi], key=lambda item: item[0])]
+
+    @staticmethod
     def _column_id(pairing_type: str, ids: Sequence[str]) -> str:
         digest = sha256((pairing_type + "|" + "|".join(ids)).encode("utf-8")).hexdigest()[:16]
         return f"rcp-{digest}"
 
     def _column(self, seq: Sequence[Flight], splits: Sequence[Sequence[int]], pairing_type: str) -> PairingColumn | None:
+        diag = self._diag
+        diag["generated"] += 1
+        by_type = diag["generated_by_type"]
+        by_type[pairing_type] = by_type.get(pairing_type, 0) + 1
         ids = tuple(str(f["flight_id"]) for f in seq)
         if len(set(ids)) != len(ids) or not set(ids).issubset(self.flight_ids):
+            diag["rejected_invalid_flight_set"] += 1
             return None
         try:
             violations = self.validator(seq, splits, pairing_type)
         except (TypeError, ValueError, KeyError, IndexError):
+            diag["rejected_validator_error"] += 1
             return None
         if violations:
+            diag["rejected_validator_violation"] += 1
             return None
         cost = self.pairing_cost if self.pairing_cost_fn is None else float(self.pairing_cost_fn(seq, splits, pairing_type))
         if not isfinite(cost) or cost < 0:
+            diag["rejected_invalid_cost"] += 1
             return None
+        diag["passed_validation"] += 1
         return PairingColumn(
             column_id=self._column_id(pairing_type, ids),
             flight_ids=ids,
@@ -230,14 +305,11 @@ class ResourceConstrainedPairingPricer:
 
         # Two-duty multi-day pairings: hub -> permitted layover -> hub.
         if self.max_duties >= 2:
+            inbound_index = {s: self._index_by_start(v) for s, v in inbound.items()}
             for station in sorted(set(outbound) & set(inbound)):
                 for first in outbound[station]:
-                    for second in inbound[station]:
+                    for second in self._starting_within_layover(inbound_index[station], first.end_time):
                         if set(first.ids) & set(second.ids):
-                            continue
-                        if second.start_time <= first.end_time:
-                            continue
-                        if second.start_time - first.end_time > self.max_layover:
                             continue
                         seq = first.flights + second.flights
                         split_at = len(first.flights)
@@ -252,20 +324,17 @@ class ResourceConstrainedPairingPricer:
             for duty in duties:
                 if duty.start_station in self.layover_stations and duty.end_station in self.layover_stations:
                     middle_by_start.setdefault(duty.start_station, []).append(duty)
+            middle_index = {s: self._index_by_start(v) for s, v in middle_by_start.items()}
             for first_station in sorted(outbound):
                 for first in outbound[first_station]:
-                    for middle in middle_by_start.get(first.end_station, ()):
-                        if middle.start_time <= first.end_time:
-                            continue
-                        if middle.start_time - first.end_time > self.max_layover:
-                            continue
+                    if first.end_station not in middle_index:
+                        continue
+                    for middle in self._starting_within_layover(middle_index[first.end_station], first.end_time):
                         if set(first.ids) & set(middle.ids):
                             continue
-                        for third in inbound.get(middle.end_station, ()):
-                            if third.start_time <= middle.end_time:
-                                continue
-                            if third.start_time - middle.end_time > self.max_layover:
-                                continue
+                        if middle.end_station not in inbound_index:
+                            continue
+                        for third in self._starting_within_layover(inbound_index[middle.end_station], middle.end_time):
                             if set(first.ids) & set(third.ids) or set(middle.ids) & set(third.ids):
                                 continue
                             seq = first.flights + middle.flights + third.flights
@@ -294,10 +363,15 @@ class ResourceConstrainedPairingPricer:
         makes crew-only reduced-cost filtering insufficient. The method does not
         claim that the declared domain contains every operationally legal pairing.
         """
+        self._diag = self._new_diagnostics()
         unique: dict[str, PairingColumn] = {}
         for column in self._candidate_columns():
             unique.setdefault(column.column_id, column)
         columns = list(unique.values())
+        self._diag["unique_columns_returned"] = len(columns)
+        self._diag["deduplicated_within_pricer"] = (
+            int(self._diag["passed_validation"]) - len(columns)
+        )
         if self.candidate_score_fn is None:
             return tuple(sorted(columns, key=lambda col: col.column_id))
         by_id = {str(f["flight_id"]): f for f in self.flights}
